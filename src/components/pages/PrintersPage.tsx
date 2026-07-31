@@ -219,18 +219,23 @@ export function PrintersPage({ onToast }: { onToast: ToastFn }) {
               <p className="font-medium text-foreground">Network requirements</p>
               <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
                 <li>
-                  Printer must be reachable from the host running this app
-                  (same LAN / VPN). Cloud deploys cannot reach private
-                  192.168.x.x addresses — use Download ZPL on those hosts, or
-                  run the app on-prem.
+                  <strong>Saving a printer</strong> only stores IP/port in the
+                  database — it does not test the connection.
+                </li>
+                <li>
+                  <strong>Live Print</strong> opens a TCP socket from the{" "}
+                  <em>server</em> to the printer. Vercel cannot reach private
+                  IPs like <code className="rounded bg-muted px-1">192.168.96.21</code>
+                  . Use <strong>Download ZPL</strong>, or run the app on-prem /
+                  VPN on the printer LAN.
                 </li>
                 <li>
                   Enable RAW TCP printing (usually port <strong>9100</strong>)
                   on the printer.
                 </li>
                 <li>
-                  Labels are generated as ZPL with Code 128 barcodes for asset
-                  and bin tags.
+                  Labels are ZPL with <strong>QR codes</strong> for asset and
+                  bin tags.
                 </li>
               </ul>
             </div>

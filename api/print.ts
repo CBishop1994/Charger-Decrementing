@@ -202,9 +202,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const result = await sendRawToPrinter(printer!.host, printer!.port, fullZpl);
     if (!result.ok) {
+      const unreachable =
+        /EHOSTUNREACH|ENETUNREACH|ECONNREFUSED|ETIMEDOUT|timed out|no route/i.test(
+          result.error,
+        );
       return res.status(502).json({
         error: result.error,
-        hint: "Check that the printer IP is reachable from this server and RAW/9100 is enabled. You can still Download ZPL and send it with a local print utility.",
+        code: unreachable ? "PRINTER_UNREACHABLE" : "PRINT_FAILED",
+        hint: unreachable
+          ? `This app server cannot reach ${printer!.host}:${printer!.port}. Vercel (cloud) cannot print to private LAN IPs like 192.168.x.x. Use Download ZPL and send it from a PC on the printer network, or host this app on-prem / VPN where ${printer!.host} is reachable. Also confirm RAW/9100 is enabled on the printer.`
+          : "Check that the printer IP is reachable from this server and RAW/9100 is enabled. You can still Download ZPL and send it with a local print utility.",
         zpl: fullZpl,
         printer: {
           id: printer!.id,
