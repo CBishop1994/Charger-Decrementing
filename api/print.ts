@@ -114,10 +114,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const size = {
-      widthMm: printer?.label_width_mm ?? Number(body.label_width_mm ?? 50) || 50,
+      widthMm:
+        printer?.label_width_mm ??
+        (Number(body.label_width_mm ?? 50) || 50),
       heightMm:
-        printer?.label_height_mm ?? Number(body.label_height_mm ?? 25) || 25,
-      dpi: printer?.dpi ?? Number(body.dpi ?? 203) || 203,
+        printer?.label_height_mm ??
+        (Number(body.label_height_mm ?? 25) || 25),
+      dpi: printer?.dpi ?? (Number(body.dpi ?? 203) || 203),
     };
 
     let zpl = "";

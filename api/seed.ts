@@ -166,15 +166,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: printers, error: printErr } = await supabaseAdmin
       .from("printer_settings")
       .insert({
-        name: "Shop Floor Zebra",
-        host: "192.168.1.50",
+        name: "Retrievals Printer",
+        host: "192.168.96.21",
         port: 9100,
         protocol: "zpl",
-        label_width_mm: 50,
-        label_height_mm: 25,
+        label_width_mm: 101.6,
+        label_height_mm: 50.8,
         dpi: 203,
         is_default: true,
-        notes: "Example Ethernet label printer — update IP to match your device",
+        notes:
+          "Default shop-floor Zebra on 192.168.96.21:9100 (4×2 in labels @ 203 dpi). Host app must reach this LAN IP for live Print; otherwise use Download ZPL.",
       })
       .select();
     if (printErr) return sendDbError(res, printErr);
