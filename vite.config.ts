@@ -2,10 +2,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { appbuilderApiDevServer } from "./vite-plugins/appbuilder-api-dev-server";
 
 export default defineConfig({
   optimizeDeps: { exclude: ["@electric-sql/pglite"] },
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), appbuilderApiDevServer()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },
