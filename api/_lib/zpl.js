@@ -9,13 +9,20 @@ function escapeZpl(value) {
     .replace(/\\/g, "\\\\")
     .replace(/\^/g, " ")
     .replace(/~/g, " ")
+    .replace(/[\r\n\t]/g, " ")
     .slice(0, 64);
 }
 
-/**
- * Magnification for ^BQ based on label height so the QR stays scannable
- * without overflowing a small asset tag.
- */
+/** CRLF + trailing newline; strip BOM for Windows / Zebra utilities. */
+export function finalizeZpl(zpl) {
+  const normalized = String(zpl ?? "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  return `${normalized.replace(/\n/g, "\r\n")}\r\n`;
+}
+
 function qrMagnification(heightDots, dpi) {
   const target = Math.floor(heightDots * 0.48);
   const mag = Math.round(target / 29);
@@ -47,6 +54,8 @@ export function buildAssetTagZpl(
   const lines = [
     "^XA",
     "^CI28",
+    "^PR4,4",
+    "^MD15",
     `^PW${width}`,
     `^LL${height}`,
     "^LH0,0",
@@ -74,7 +83,6 @@ export function buildAssetTagZpl(
     y += 20;
   }
 
-  // QR code on the right — Model 2, medium error correction via MA mode
   lines.push(`^FO${qrX},${qrY}^BQN,2,${mag}^FDMA,${qrData}^FS`);
 
   if (footer) {
@@ -84,7 +92,7 @@ export function buildAssetTagZpl(
   }
 
   lines.push("^XZ");
-  return lines.join("\n");
+  return finalizeZpl(lines.join("\n"));
 }
 
 export function buildConsumableLabelZpl(item, size) {

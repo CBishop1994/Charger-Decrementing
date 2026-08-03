@@ -10,8 +10,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { api, isSetupRequiredError, type BinLocation, type PrinterSetting } from "@/lib/api";
-import { downloadText } from "@/lib/download";
-import { buildBinLocationLabelZpl, labelPreviewLines } from "@/lib/zpl";
+import { copyText, downloadText } from "@/lib/download";
+import {
+  buildBinLocationLabelZpl,
+  finalizeZpl,
+  labelPreviewLines,
+} from "@/lib/zpl";
 import { LabelPreview } from "@/components/LabelPreview";
 import { SetupRequiredBanner } from "@/components/SetupRequiredBanner";
 import { Button } from "@/components/ui/button";
@@ -206,22 +210,18 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
     setPrintOpen(true);
   };
 
-  const downloadZpl = async () => {
-    if (!printBin) return;
+  const resolveBinZpl = async (): Promise<string> => {
+    if (!printBin) throw new Error("No bin selected");
+    const copies = Math.max(1, Number(printCopies) || 1);
     try {
       const res = await api.post<{ zpl: string }>("/api/print", {
         type: "bin",
         id: printBin.id,
-        copies: Number(printCopies) || 1,
+        copies,
         dry_run: true,
         printer_id: printPrinterId ? Number(printPrinterId) : undefined,
       });
-      downloadText(
-        res.zpl,
-        `${printBin.asset_tag || printBin.code}-bin.zpl`,
-        "application/octet-stream",
-      );
-      onToast({ title: "ZPL downloaded", variant: "success" });
+      return finalizeZpl(res.zpl);
     } catch {
       const printer = printers.find((p) => String(p.id) === printPrinterId);
       const zpl = buildBinLocationLabelZpl(printBin, {
@@ -229,13 +229,51 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
         heightMm: printer?.label_height_mm ?? 25,
         dpi: printer?.dpi ?? 203,
       });
-      const copies = Math.max(1, Number(printCopies) || 1);
+      const one = finalizeZpl(zpl).replace(/\r\n$/, "");
+      return finalizeZpl(Array.from({ length: copies }, () => one).join("\n"));
+    }
+  };
+
+  const downloadZpl = async () => {
+    if (!printBin) return;
+    try {
+      const zpl = await resolveBinZpl();
       downloadText(
-        Array.from({ length: copies }, () => zpl).join("\n"),
-        `${printBin.asset_tag || printBin.code}-bin.zpl`,
-        "application/octet-stream",
+        zpl,
+        `${printBin.asset_tag || printBin.code}-bin.txt`,
+        "text/plain;charset=utf-8",
       );
-      onToast({ title: "ZPL downloaded (local)" });
+      onToast({
+        title: "Label file downloaded",
+        description:
+          "Raw ZPL for Zebra Setup Utilities — not a ZebraDesigner project.",
+        variant: "success",
+      });
+    } catch (err) {
+      onToast({
+        title: "Download failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const copyZpl = async () => {
+    if (!printBin) return;
+    try {
+      const zpl = await resolveBinZpl();
+      await copyText(zpl);
+      onToast({
+        title: "ZPL copied",
+        description: "Paste into Zebra Setup Utilities or a raw print tool.",
+        variant: "success",
+      });
+    } catch (err) {
+      onToast({
+        title: "Copy failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
     }
   };
 
@@ -512,7 +550,8 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
           <DialogHeader>
             <DialogTitle>Print bin location tag</DialogTitle>
             <DialogDescription>
-              ZPL location label for rack / shelf identification.
+              Download saves raw ZPL for Zebra Setup Utilities — not a
+              ZebraDesigner project file.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -552,10 +591,18 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
             </div>
             <LabelPreview lines={previewLines} footer={printBin?.asset_tag} />
           </div>
-          <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            Use <strong>Zebra Setup Utilities</strong> → Open Printer Tools →
+            Action → Send file. ZebraDesigner will not open this file as a
+            project.
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button variant="outline" onClick={() => void copyZpl()}>
+              Copy ZPL
+            </Button>
             <Button variant="outline" onClick={() => void downloadZpl()}>
               <Download className="mr-2 h-4 w-4" />
-              Download ZPL
+              Download label file
             </Button>
             <Button
               onClick={() => void sendPrint()}

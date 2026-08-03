@@ -27,7 +27,23 @@ function escapeZpl(value: string): string {
     .replace(/\\/g, "\\\\")
     .replace(/\^/g, " ")
     .replace(/~/g, " ")
+    .replace(/[\r\n\t]/g, " ")
     .slice(0, 64);
+}
+
+/**
+ * Finalize ZPL for download / raw send.
+ * - CRLF line endings (Windows + many Zebra utilities prefer this)
+ * - Trailing newline so the printer sees a complete stream
+ * - No UTF-8 BOM (BOMs make some tools reject the file)
+ */
+export function finalizeZpl(zpl: string): string {
+  const normalized = String(zpl ?? "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  return `${normalized.replace(/\n/g, "\r\n")}\r\n`;
 }
 
 /**
@@ -35,9 +51,7 @@ function escapeZpl(value: string): string {
  * without overflowing a small asset tag.
  */
 function qrMagnification(heightDots: number, dpi: number): number {
-  // Rough target: QR side ≈ 40–55% of label height
   const target = Math.floor(heightDots * 0.48);
-  // At 203 dpi, module size ≈ mag dots; QR version 2–3 is ~25–33 modules
   const mag = Math.round(target / 29);
   return Math.min(10, Math.max(3, mag || (dpi >= 300 ? 4 : 3)));
 }
@@ -59,7 +73,6 @@ export function buildAssetTagZpl(
   const footer = escapeZpl(payload.footer || "");
 
   const mag = qrMagnification(height, dpi);
-  // Approximate QR module count for layout (model 2, short payloads)
   const qrSide = mag * 29;
   const qrX = Math.max(16, width - qrSide - 16);
   const qrY = Math.max(12, Math.round((height - qrSide) / 2));
@@ -68,10 +81,11 @@ export function buildAssetTagZpl(
   const lines: string[] = [
     "^XA",
     "^CI28",
+    "^PR4,4",
+    "^MD15",
     `^PW${width}`,
     `^LL${height}`,
     "^LH0,0",
-    // Title (left column)
     `^FO16,12^A0N,26,26^FB${textMaxX - 16},2,0,L,0^FD${title}^FS`,
   ];
 
@@ -83,13 +97,11 @@ export function buildAssetTagZpl(
     y += 24;
   }
 
-  // Asset tag code (prominent)
   lines.push(
     `^FO16,${y}^A0N,28,28^FB${textMaxX - 16},1,0,L,0^FD${tag}^FS`,
   );
   y += 34;
 
-  // Optional extra fields under the tag
   for (const field of payload.fields ?? []) {
     if (y > height - 28) break;
     lines.push(
@@ -98,8 +110,6 @@ export function buildAssetTagZpl(
     y += 20;
   }
 
-  // QR code on the right — Model 2, medium error correction (M)
-  // Field data: MA = manual mode, alphanumeric-friendly plain data after comma
   lines.push(`^FO${qrX},${qrY}^BQN,2,${mag}^FDMA,${qrData}^FS`);
 
   if (footer) {
@@ -109,7 +119,7 @@ export function buildAssetTagZpl(
   }
 
   lines.push("^XZ");
-  return lines.join("\n");
+  return finalizeZpl(lines.join("\n"));
 }
 
 export function buildConsumableLabelZpl(

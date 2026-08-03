@@ -12,8 +12,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { api, isSetupRequiredError, type Consumable, type PrinterSetting } from "@/lib/api";
-import { downloadText } from "@/lib/download";
-import { buildConsumableLabelZpl, labelPreviewLines } from "@/lib/zpl";
+import { copyText, downloadText } from "@/lib/download";
+import {
+  buildConsumableLabelZpl,
+  finalizeZpl,
+  labelPreviewLines,
+} from "@/lib/zpl";
 import { StockBadge } from "@/components/StockBadge";
 import { LabelPreview } from "@/components/LabelPreview";
 import { SetupRequiredBanner } from "@/components/SetupRequiredBanner";
@@ -336,39 +340,70 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
     setPrintOpen(true);
   };
 
-  const downloadZpl = async () => {
-    if (!printItem) return;
+  const resolveLabelZpl = async (): Promise<string> => {
+    if (!printItem) throw new Error("No item selected");
+    const copies = Math.max(1, Number(printCopies) || 1);
     try {
       const res = await api.post<{ zpl: string }>("/api/print", {
         type: "consumable",
         id: printItem.id,
-        copies: Number(printCopies) || 1,
+        copies,
         dry_run: true,
         printer_id: printPrinterId ? Number(printPrinterId) : undefined,
       });
-      downloadText(
-        res.zpl,
-        `${printItem.asset_tag || printItem.sku}-label.zpl`,
-        "application/octet-stream",
-      );
-      onToast({ title: "ZPL downloaded", variant: "success" });
-    } catch (err) {
-      // Fallback local generation
+      return finalizeZpl(res.zpl);
+    } catch {
       const printer = printers.find((p) => String(p.id) === printPrinterId);
       const zpl = buildConsumableLabelZpl(printItem, {
         widthMm: printer?.label_width_mm ?? 50,
         heightMm: printer?.label_height_mm ?? 25,
         dpi: printer?.dpi ?? 203,
       });
-      const copies = Math.max(1, Number(printCopies) || 1);
+      const one = finalizeZpl(zpl).replace(/\r\n$/, "");
+      return finalizeZpl(Array.from({ length: copies }, () => one).join("\n"));
+    }
+  };
+
+  const downloadZpl = async () => {
+    if (!printItem) return;
+    try {
+      const zpl = await resolveLabelZpl();
+      // .txt opens more reliably with Notepad / Zebra Setup Utilities on Windows
       downloadText(
-        Array.from({ length: copies }, () => zpl).join("\n"),
-        `${printItem.asset_tag || printItem.sku}-label.zpl`,
-        "application/octet-stream",
+        zpl,
+        `${printItem.asset_tag || printItem.sku}-label.txt`,
+        "text/plain;charset=utf-8",
       );
       onToast({
-        title: "ZPL downloaded (local)",
-        description: err instanceof Error ? err.message : undefined,
+        title: "Label file downloaded",
+        description:
+          "This is raw printer code (ZPL), not a ZebraDesigner project. Send it with Zebra Setup Utilities → Open Communication with Printer → Send File.",
+        variant: "success",
+      });
+    } catch (err) {
+      onToast({
+        title: "Download failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const copyZpl = async () => {
+    if (!printItem) return;
+    try {
+      const zpl = await resolveLabelZpl();
+      await copyText(zpl);
+      onToast({
+        title: "ZPL copied",
+        description: "Paste into Zebra Setup Utilities or a raw print tool.",
+        variant: "success",
+      });
+    } catch (err) {
+      onToast({
+        title: "Copy failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
       });
     }
   };
@@ -796,8 +831,9 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
           <DialogHeader>
             <DialogTitle>Print asset tag</DialogTitle>
             <DialogDescription>
-              Sends ZPL to your Ethernet label printer, or download the file for
-              a local utility.
+              Prefer <strong>Print to network</strong> when this PC can reach the
+              printer. <strong>Download</strong> saves raw ZPL for Zebra Setup
+              Utilities — not a ZebraDesigner project file.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -844,10 +880,28 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
             </div>
             <LabelPreview lines={previewLines} footer={printItem?.asset_tag} />
           </div>
-          <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            <p className="font-medium text-foreground">Using the downloaded file</p>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+              <li>Open <strong>Zebra Setup Utilities</strong> (not ZebraDesigner).</li>
+              <li>Select your printer → <strong>Open Printer Tools</strong>.</li>
+              <li>
+                <strong>Action</strong> → <strong>Send file</strong> → choose the
+                downloaded <code className="rounded bg-muted px-1">.txt</code> file.
+              </li>
+            </ol>
+            <p className="mt-1.5">
+              ZebraDesigner 3 designs labels visually and will not open raw ZPL as
+              a project — that is expected.
+            </p>
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button variant="outline" onClick={() => void copyZpl()}>
+              Copy ZPL
+            </Button>
             <Button variant="outline" onClick={() => void downloadZpl()}>
               <Download className="mr-2 h-4 w-4" />
-              Download ZPL
+              Download label file
             </Button>
             <Button onClick={() => void sendPrint()} disabled={printing || printers.length === 0}>
               <Printer className="mr-2 h-4 w-4" />
