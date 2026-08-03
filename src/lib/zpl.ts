@@ -23,7 +23,7 @@ function mmToDots(mm: number, dpi = 203): number {
 }
 
 function escapeZpl(value: string): string {
-  return value
+  return String(value ?? "")
     .replace(/\\/g, "\\\\")
     .replace(/\^/g, " ")
     .replace(/~/g, " ")
@@ -47,13 +47,41 @@ export function finalizeZpl(zpl: string): string {
 }
 
 /**
- * Magnification for ^BQ based on label height so the QR stays scannable
- * without overflowing a small asset tag.
+ * Normalize label size so we never accidentally emit a tiny 2×1 layout
+ * on 4×2 stock (that looks "squished" into the top-left corner).
  */
+export function normalizeLabelSize(size?: Partial<LabelSize> | null): LabelSize {
+  const dpi = Number(size?.dpi) > 0 ? Number(size?.dpi) : 203;
+  let widthMm = Number(size?.widthMm);
+  let heightMm = Number(size?.heightMm);
+
+  // Missing / invalid → 4×2 in
+  if (!Number.isFinite(widthMm) || widthMm <= 0) widthMm = 101.6;
+  if (!Number.isFinite(heightMm) || heightMm <= 0) heightMm = 50.8;
+
+  // Values that look like inches by mistake (e.g. 4 and 2) → convert
+  if (widthMm <= 12 && heightMm <= 12) {
+    widthMm *= 25.4;
+    heightMm *= 25.4;
+  }
+
+  // Anything still smaller than ~3×1.5 in is almost certainly the old
+  // 50×25 default — bump to full 4×2 so labels fill the stock.
+  if (widthMm < 76 || heightMm < 38) {
+    widthMm = 101.6;
+    heightMm = 50.8;
+  }
+
+  return { widthMm, heightMm, dpi };
+}
+
+/** QR magnification that fills ~half the label height. */
 function qrMagnification(heightDots: number, dpi: number): number {
-  const target = Math.floor(heightDots * 0.48);
+  // Target QR side ≈ 55% of label height for a strong scan target on 4×2
+  const target = Math.floor(heightDots * 0.55);
+  // Module count for short alphanumeric payloads is roughly 25–33
   const mag = Math.round(target / 29);
-  return Math.min(10, Math.max(3, mag || (dpi >= 300 ? 4 : 3)));
+  return Math.min(10, Math.max(4, mag || (dpi >= 300 ? 5 : 4)));
 }
 
 /** Default shop-floor label: 4×2 in (101.6 × 50.8 mm) @ 203 dpi — ZT411 common. */
@@ -63,14 +91,19 @@ export const DEFAULT_LABEL_SIZE: LabelSize = {
   dpi: 203,
 };
 
-/** Build a compact asset-tag ZPL label with a QR code. Tuned for 4×2" labels. */
+/**
+ * Build a full-bleed asset-tag ZPL label with a large QR code.
+ * Coordinates are computed from the label size so content fills 4×2 stock
+ * instead of sitting in the top-left corner.
+ */
 export function buildAssetTagZpl(
   payload: AssetTagPayload,
   size: LabelSize = DEFAULT_LABEL_SIZE,
 ): string {
-  const dpi = size.dpi ?? 203;
-  const width = mmToDots(size.widthMm, dpi);
-  const height = mmToDots(size.heightMm, dpi);
+  const { widthMm, heightMm, dpi = 203 } = normalizeLabelSize(size);
+  const width = mmToDots(widthMm, dpi);
+  const height = mmToDots(heightMm, dpi);
+
   const qrData = escapeZpl(
     payload.qrValue || payload.barcodeValue || payload.assetTag,
   );
@@ -79,70 +112,90 @@ export function buildAssetTagZpl(
   const subtitle = escapeZpl(payload.subtitle || "");
   const footer = escapeZpl(payload.footer || "");
 
-  // Scale type from label height so 4×2" (≈406 dots @ 203dpi) stays readable
-  // while smaller tags still fit.
-  const scale = Math.max(0.75, Math.min(1.35, height / 400));
-  const pad = Math.round(20 * scale);
-  const titleH = Math.round(36 * scale);
-  const subH = Math.round(24 * scale);
-  const tagH = Math.round(42 * scale);
-  const fieldH = Math.round(22 * scale);
-  const footerH = Math.round(18 * scale);
+  // Margins ~3 mm from edges
+  const margin = Math.max(16, Math.round(mmToDots(3, dpi)));
+  const gap = Math.max(12, Math.round(mmToDots(2, dpi)));
 
+  // QR on the right — large enough to scan easily on 4×2
   const mag = qrMagnification(height, dpi);
+  // Approximate rendered QR side (modules ≈ 29 for short payloads + quiet zone)
   const qrSide = mag * 29;
-  const qrX = Math.max(pad, width - qrSide - pad);
-  const qrY = Math.max(pad, Math.round((height - qrSide) / 2));
-  const textMaxX = qrX - pad;
-  const textW = Math.max(80, textMaxX - pad);
+  const qrX = width - margin - qrSide;
+  const qrY = Math.round((height - qrSide) / 2);
+
+  // Text column uses everything left of the QR with a gap
+  const textX = margin;
+  const textW = Math.max(120, qrX - gap - textX);
+
+  // Type scale from label height (4×2 @ 203dpi → height 406)
+  // Tuned so a 4×2 label uses large, readable fonts across the full height.
+  const titleH = Math.max(28, Math.round(height * 0.11));
+  const subH = Math.max(20, Math.round(height * 0.07));
+  const tagH = Math.max(32, Math.round(height * 0.13));
+  const fieldH = Math.max(18, Math.round(height * 0.06));
+  const footerH = Math.max(16, Math.round(height * 0.05));
+  const lineGap = Math.max(8, Math.round(height * 0.025));
 
   const lines: string[] = [
     "^XA",
-    // ZT411-friendly defaults
     "^CI28",
-    "^PW" + width,
-    "^LL" + height,
+    // Explicit print width / length in dots — critical so ZT411 doesn't
+    // keep an old smaller format and park graphics in the corner.
+    `^PW${width}`,
+    `^LL${height}`,
     "^LH0,0",
     "^LT0",
     "^LS0",
-    // Do not override media type (^MN) — keep the ZT411's calibrated gap/mark setting
     "^PR4,4",
-    "^MD15",
-    // Start fresh format
-    `^FO${pad},${pad}^A0N,${titleH},${titleH}^FB${textW},2,0,L,0^FD${title}^FS`,
+    "^MD20",
+    // Clear image buffer before drawing
+    "^MCY",
   ];
 
-  let y = pad + titleH + Math.round(10 * scale);
+  // Vertical stack starting near the top, ending above the footer
+  let y = margin;
+
+  // Title (wrap up to 2 lines)
+  lines.push(
+    `^FO${textX},${y}^A0N,${titleH},${titleH}^FB${textW},${2},0,L,0^FD${title}^FS`,
+  );
+  y += titleH * 2 + lineGap;
+
   if (subtitle) {
     lines.push(
-      `^FO${pad},${y}^A0N,${subH},${subH}^FB${textW},1,0,L,0^FD${subtitle}^FS`,
+      `^FO${textX},${y}^A0N,${subH},${subH}^FB${textW},1,0,L,0^FD${subtitle}^FS`,
     );
-    y += subH + Math.round(8 * scale);
+    y += subH + lineGap;
   }
 
+  // Asset tag — most prominent text
   lines.push(
-    `^FO${pad},${y}^A0N,${tagH},${tagH}^FB${textW},1,0,L,0^FD${tag}^FS`,
+    `^FO${textX},${y}^A0N,${tagH},${tagH}^FB${textW},1,0,L,0^FD${tag}^FS`,
   );
-  y += tagH + Math.round(12 * scale);
+  y += tagH + lineGap + 4;
 
+  // Optional fields (BIN / MIN / LOC)
   for (const field of payload.fields ?? []) {
-    if (y > height - footerH - pad * 2) break;
+    if (y + fieldH > height - margin - footerH - lineGap) break;
+    const line = `${escapeZpl(field.label)}: ${escapeZpl(field.value)}`;
     lines.push(
-      `^FO${pad},${y}^A0N,${fieldH},${fieldH}^FB${textW},1,0,L,0^FD${escapeZpl(field.label)}: ${escapeZpl(field.value)}^FS`,
+      `^FO${textX},${y}^A0N,${fieldH},${fieldH}^FB${textW},1,0,L,0^FD${line}^FS`,
     );
-    y += fieldH + Math.round(6 * scale);
+    y += fieldH + lineGap;
   }
 
-  // QR — Field Data: QA = automatic mode (most compatible on ZT411)
+  // Large QR on the right, vertically centered
+  // QA = automatic mode (most compatible on ZT411)
   lines.push(`^FO${qrX},${qrY}^BQN,2,${mag}^FDQA,${qrData}^FS`);
 
+  // Footer along the bottom of the text column
   if (footer) {
+    const footerY = height - margin - footerH;
     lines.push(
-      `^FO${pad},${height - footerH - pad}^A0N,${footerH},${footerH}^FB${textW},1,0,L,0^FD${footer}^FS`,
+      `^FO${textX},${footerY}^A0N,${footerH},${footerH}^FB${textW},1,0,L,0^FD${footer}^FS`,
     );
   }
 
-  // Print quantity 1 for this format block (copies are duplicated by caller)
   lines.push("^PQ1,0,1,Y");
   lines.push("^XZ");
   return finalizeZpl(lines.join("\n"));
@@ -176,7 +229,7 @@ export function buildConsumableLabelZpl(
       ],
       footer: "CONSUMABLE",
     },
-    size,
+    size ?? DEFAULT_LABEL_SIZE,
   );
 }
 
@@ -202,7 +255,7 @@ export function buildBinLocationLabelZpl(
       fields: locParts ? [{ label: "LOC", value: locParts }] : [],
       footer: "BIN LOCATION",
     },
-    size,
+    size ?? DEFAULT_LABEL_SIZE,
   );
 }
 
