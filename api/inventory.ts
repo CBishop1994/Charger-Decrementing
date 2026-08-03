@@ -509,9 +509,9 @@ async function handlePrinters(
       if (body.protocol !== undefined)
         updates.protocol = String(body.protocol).trim() || "zpl";
       if (body.label_width_mm !== undefined)
-        updates.label_width_mm = Number(body.label_width_mm) || 50;
+        updates.label_width_mm = Number(body.label_width_mm) || 101.6;
       if (body.label_height_mm !== undefined)
-        updates.label_height_mm = Number(body.label_height_mm) || 25;
+        updates.label_height_mm = Number(body.label_height_mm) || 50.8;
       if (body.dpi !== undefined)
         updates.dpi = Math.max(100, Number(body.dpi) || 203);
       if (body.notes !== undefined) updates.notes = String(body.notes).trim();
@@ -1030,9 +1030,11 @@ async function handlePrint(req: VercelRequest, res: VercelResponse) {
   }
 
   const size = {
-    widthMm: printer?.label_width_mm ?? (Number(body.label_width_mm ?? 50) || 50),
+    widthMm:
+      printer?.label_width_mm ?? (Number(body.label_width_mm ?? 101.6) || 101.6),
     heightMm:
-      printer?.label_height_mm ?? (Number(body.label_height_mm ?? 25) || 25),
+      printer?.label_height_mm ??
+      (Number(body.label_height_mm ?? 50.8) || 50.8),
     dpi: printer?.dpi ?? (Number(body.dpi ?? 203) || 203),
   };
 
