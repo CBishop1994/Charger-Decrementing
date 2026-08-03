@@ -260,11 +260,16 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
       });
       setPrintOpen(false);
     } catch (err) {
+      const hint =
+        err && typeof err === "object" && "hint" in err
+          ? String((err as { hint?: string }).hint ?? "")
+          : "";
       onToast({
-        title: "Print failed",
+        title: "Print failed (network unreachable from cloud)",
         description:
+          hint ||
           (err instanceof Error ? err.message : "Unknown error") +
-          " — try Download ZPL from a machine on the printer LAN.",
+            " — use Download ZPL from a PC on the printer network.",
         variant: "destructive",
       });
     } finally {

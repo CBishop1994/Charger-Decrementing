@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabaseAdmin } from "./_lib/supabase-admin.js";
 import { sendDbError } from "./_lib/errors.js";
+import { requireApprovedUser } from "./_lib/require-auth.js";
 
 function generateAssetTag(sku: string): string {
   const clean = sku.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8) || "ITEM";
@@ -10,6 +11,9 @@ function generateAssetTag(sku: string): string {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const auth = await requireApprovedUser(req, res);
+    if (!auth) return;
+
     if (req.method === "GET") {
       const status = String(req.query.status ?? "all");
       const search = String(req.query.search ?? "").trim();

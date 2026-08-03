@@ -68,3 +68,17 @@ export const printer_settings = pgTable("printer_settings", {
   notes: text("notes").notNull().default(""),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+/**
+ * Google accounts allowed to sign in. Emails are stored lowercase.
+ * The first successful Google sign-in seeds this table as admin when empty.
+ */
+export const approved_emails = pgTable("approved_emails", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  name: text("name").notNull().default(""),
+  is_admin: boolean("is_admin").notNull().default(false),
+  created_by: text("created_by").notNull().default("system"),
+  notes: text("notes").notNull().default(""),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});

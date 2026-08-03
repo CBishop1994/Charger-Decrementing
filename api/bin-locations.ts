@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabaseAdmin } from "./_lib/supabase-admin.js";
 import { sendDbError } from "./_lib/errors.js";
+import { requireApprovedUser } from "./_lib/require-auth.js";
 
 function generateBinAssetTag(code: string): string {
   const clean = code.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8) || "BIN";
@@ -10,6 +11,9 @@ function generateBinAssetTag(code: string): string {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const auth = await requireApprovedUser(req, res);
+    if (!auth) return;
+
     if (req.method === "GET") {
       const search = String(req.query.search ?? "").trim();
       let query = supabaseAdmin

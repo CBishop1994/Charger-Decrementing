@@ -35,6 +35,7 @@ export function isSetupRequiredError(err: unknown): boolean {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
@@ -143,4 +144,14 @@ export type DashboardStats = {
   recent_transactions: Array<
     StockTransaction & { consumable_name?: string; consumable_sku?: string }
   >;
+};
+
+export type ApprovedEmail = {
+  id: number;
+  email: string;
+  name: string;
+  is_admin: boolean;
+  created_by: string;
+  notes: string;
+  created_at: string | null;
 };

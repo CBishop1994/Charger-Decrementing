@@ -35,17 +35,23 @@ export function SetupRequiredBanner({ error, onRetry }: Props) {
           </div>
           <ol className="list-decimal space-y-1 pl-5 text-sm text-foreground/90">
             <li>
-              Open the <strong>Database</strong> panel in App Builder (linked
-              Supabase project).
+              Confirm this app is pointed at the correct Supabase project
+              (<code className="rounded bg-muted px-1 py-0.5 text-xs">SUPABASE_URL</code>{" "}
+              +{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">SUPABASE_SERVICE_ROLE_KEY</code>
+              ).
             </li>
             <li>
-              Click <strong>Push to Supabase</strong> and confirm creating the
-              tables (<code className="rounded bg-muted px-1 py-0.5 text-xs">consumables</code>,{" "}
+              Ensure inventory tables exist with full columns:{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">consumables</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">bin_locations</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">stock_transactions</code>,{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">printer_settings</code>).
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">printer_settings</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">approved_emails</code>
+              . Org-linked projects can use <strong>Push to Supabase</strong>; personal
+              projects need the schema applied via the Database SQL editor or setup flow.
             </li>
-            <li>Reload this app, then use <strong>Load sample data</strong> on the dashboard.</li>
+            <li>Reload this app, sign in with Google, then use <strong>Load sample data</strong> on the dashboard.</li>
           </ol>
           {onRetry ? (
             <div className="pt-1">

@@ -255,7 +255,6 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
         delta,
         reason: adjustMode === "use" ? "use" : "restock",
         note: adjustNote.trim(),
-        created_by: "operator",
       });
       onToast({
         title:

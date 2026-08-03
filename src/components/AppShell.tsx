@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 import {
   Boxes,
   LayoutDashboard,
+  LogOut,
   MapPin,
   Moon,
   Package,
   Printer,
+  Shield,
   Sun,
   History,
 } from "lucide-react";
@@ -13,13 +15,15 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/theme";
 import { BlurFade } from "@/components/ui/blur-fade";
+import { useAuth } from "@/lib/auth/use-auth";
 
 export type AppView =
   | "dashboard"
   | "consumables"
   | "bins"
   | "printers"
-  | "history";
+  | "history"
+  | "access";
 
 const NAV: Array<{
   id: AppView;
@@ -57,6 +61,12 @@ const NAV: Array<{
     icon: History,
     description: "Stock movement log",
   },
+  {
+    id: "access",
+    label: "Access",
+    icon: Shield,
+    description: "Approved Google emails",
+  },
 ];
 
 export function AppShell({
@@ -69,7 +79,15 @@ export function AppShell({
   children: ReactNode;
 }) {
   const { theme, toggle } = useTheme();
+  const { user, signOut } = useAuth();
   const active = NAV.find((n) => n.id === view) ?? NAV[0];
+  const displayName = user?.name || user?.email || "Signed in";
+  const initials = (user?.name || user?.email || "?")
+    .split(/\s+|@/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -125,16 +143,40 @@ export function AppShell({
             })}
           </nav>
 
-          <div className="border-t border-sidebar-border p-4">
-            <div className="rounded-xl border border-border bg-card/60 p-3">
-              <p className="text-xs font-medium text-foreground">
-                Floor-ready inventory
-              </p>
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                Track mins, decrement stock, and print ZPL asset tags to your
-                Ethernet label printer.
-              </p>
+          <div className="space-y-3 border-t border-sidebar-border p-4">
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-card/60 p-3">
+              {user?.picture ? (
+                <img
+                  src={user.picture}
+                  alt=""
+                  className="h-9 w-9 rounded-full border border-border object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                  {initials}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium text-foreground">
+                  {displayName}
+                </p>
+                {user?.email ? (
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {user.email}
+                  </p>
+                ) : null}
+              </div>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => void signOut()}
+            >
+              <LogOut className="mr-2 h-3.5 w-3.5" />
+              Sign out
+            </Button>
           </div>
         </aside>
 
@@ -165,6 +207,19 @@ export function AppShell({
                 </BlurFade>
               </div>
               <div className="flex items-center gap-2">
+                <div className="hidden items-center gap-2 sm:flex">
+                  {user?.picture ? (
+                    <img
+                      src={user.picture}
+                      alt=""
+                      className="h-8 w-8 rounded-full border border-border object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : null}
+                  <span className="max-w-[160px] truncate text-xs text-muted-foreground">
+                    {user?.email}
+                  </span>
+                </div>
                 <Button
                   variant="outline"
                   size="icon"
@@ -177,6 +232,14 @@ export function AppShell({
                   ) : (
                     <Moon className="h-4 w-4" />
                   )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="md:hidden"
+                  onClick={() => void signOut()}
+                >
+                  <LogOut className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>

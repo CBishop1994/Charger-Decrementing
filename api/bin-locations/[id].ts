@@ -1,9 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabaseAdmin } from "../_lib/supabase-admin.js";
 import { isMissingTableError, sendDbError } from "../_lib/errors.js";
+import { requireApprovedUser } from "../_lib/require-auth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const auth = await requireApprovedUser(req, res);
+    if (!auth) return;
+
     const id = Number(req.query.id);
     if (!id || Number.isNaN(id)) {
       return res.status(400).json({ error: "Valid id is required" });

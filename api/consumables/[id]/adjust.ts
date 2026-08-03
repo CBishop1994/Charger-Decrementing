@@ -1,9 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabaseAdmin } from "../../_lib/supabase-admin.js";
 import { isMissingTableError, sendDbError } from "../../_lib/errors.js";
+import { requireApprovedUser } from "../../_lib/require-auth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const auth = await requireApprovedUser(req, res);
+    if (!auth) return;
+
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
       return res.status(405).json({ error: "Method not allowed" });
@@ -22,7 +26,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const reason = String(body.reason ?? (delta < 0 ? "use" : "restock")).trim();
     const note = String(body.note ?? "").trim();
-    const created_by = String(body.created_by ?? "operator").trim() || "operator";
+    const created_by =
+      auth.email ||
+      String(body.created_by ?? "operator").trim() ||
+      "operator";
 
     const { data: item, error: fetchErr } = await supabaseAdmin
       .from("consumables")

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabaseAdmin } from "./_lib/supabase-admin.js";
 import { sendDbError } from "./_lib/errors.js";
+import { requireApprovedUser } from "./_lib/require-auth.js";
 
 const SAMPLE_BINS = [
   {
@@ -118,6 +119,9 @@ const SAMPLE_ITEMS = [
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const auth = await requireApprovedUser(req, res);
+    if (!auth) return;
+
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
       return res.status(405).json({ error: "Method not allowed" });
