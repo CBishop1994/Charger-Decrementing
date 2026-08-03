@@ -1,12 +1,108 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { appbuilderApiDevServer } from "./vite-plugins/appbuilder-api-dev-server";
 
+/**
+ * Mirror vercel.json inventory rewrites in local `npm run dev`.
+ * Production uses vercel.json; the file-based Vite API plugin only
+ * sees real files under api/, so without this middleware
+ * /api/consumables etc. 404 after consolidation into api/inventory.ts.
+ */
+function inventoryApiRewrites(): Plugin {
+  const rules: Array<{ pattern: RegExp; build: (m: RegExpMatchArray) => string }> = [
+    {
+      pattern: /^\/api\/health\/?$/,
+      build: () => "/api/inventory?resource=health",
+    },
+    {
+      pattern: /^\/api\/dashboard\/?$/,
+      build: () => "/api/inventory?resource=dashboard",
+    },
+    {
+      pattern: /^\/api\/seed\/?$/,
+      build: () => "/api/inventory?resource=seed",
+    },
+    {
+      pattern: /^\/api\/print\/?$/,
+      build: () => "/api/inventory?resource=print",
+    },
+    {
+      pattern: /^\/api\/transactions\/?$/,
+      build: () => "/api/inventory?resource=transactions",
+    },
+    {
+      pattern: /^\/api\/consumables\/(\d+)\/adjust\/?$/,
+      build: (m) =>
+        `/api/inventory?resource=consumables&id=${m[1]}&action=adjust`,
+    },
+    {
+      pattern: /^\/api\/consumables\/(\d+)\/?$/,
+      build: (m) => `/api/inventory?resource=consumables&id=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/consumables\/?$/,
+      build: () => "/api/inventory?resource=consumables",
+    },
+    {
+      pattern: /^\/api\/bin-locations\/(\d+)\/?$/,
+      build: (m) => `/api/inventory?resource=bin-locations&id=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/bin-locations\/?$/,
+      build: () => "/api/inventory?resource=bin-locations",
+    },
+    {
+      pattern: /^\/api\/printers\/(\d+)\/?$/,
+      build: (m) => `/api/inventory?resource=printers&id=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/printers\/?$/,
+      build: () => "/api/inventory?resource=printers",
+    },
+    {
+      pattern: /^\/api\/approved-emails\/(\d+)\/?$/,
+      build: (m) => `/api/inventory?resource=approved-emails&id=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/approved-emails\/?$/,
+      build: () => "/api/inventory?resource=approved-emails",
+    },
+  ];
+
+  return {
+    name: "inventory-api-rewrites",
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        if (!req.url) return next();
+        const qIdx = req.url.indexOf("?");
+        const pathname = qIdx === -1 ? req.url : req.url.slice(0, qIdx);
+        const search = qIdx === -1 ? "" : req.url.slice(qIdx + 1);
+        for (const rule of rules) {
+          const m = pathname.match(rule.pattern);
+          if (!m) continue;
+          const dest = rule.build(m);
+          const destQ = dest.includes("?") ? dest.slice(dest.indexOf("?") + 1) : "";
+          const destPath = dest.includes("?") ? dest.slice(0, dest.indexOf("?")) : dest;
+          const merged = [destQ, search].filter(Boolean).join("&");
+          req.url = merged ? `${destPath}?${merged}` : destPath;
+          break;
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   optimizeDeps: { exclude: ["@electric-sql/pglite"] },
-  plugins: [react(), tailwindcss(), appbuilderApiDevServer()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    inventoryApiRewrites(),
+    appbuilderApiDevServer(),
+  ],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },

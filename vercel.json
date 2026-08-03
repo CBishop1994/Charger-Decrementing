@@ -1,6 +1,65 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/health",
+      "destination": "/api/inventory?resource=health"
+    },
+    {
+      "source": "/api/dashboard",
+      "destination": "/api/inventory?resource=dashboard"
+    },
+    {
+      "source": "/api/seed",
+      "destination": "/api/inventory?resource=seed"
+    },
+    {
+      "source": "/api/print",
+      "destination": "/api/inventory?resource=print"
+    },
+    {
+      "source": "/api/transactions",
+      "destination": "/api/inventory?resource=transactions"
+    },
+    {
+      "source": "/api/consumables/:id/adjust",
+      "destination": "/api/inventory?resource=consumables&id=:id&action=adjust"
+    },
+    {
+      "source": "/api/consumables/:id",
+      "destination": "/api/inventory?resource=consumables&id=:id"
+    },
+    {
+      "source": "/api/consumables",
+      "destination": "/api/inventory?resource=consumables"
+    },
+    {
+      "source": "/api/bin-locations/:id",
+      "destination": "/api/inventory?resource=bin-locations&id=:id"
+    },
+    {
+      "source": "/api/bin-locations",
+      "destination": "/api/inventory?resource=bin-locations"
+    },
+    {
+      "source": "/api/printers/:id",
+      "destination": "/api/inventory?resource=printers&id=:id"
+    },
+    {
+      "source": "/api/printers",
+      "destination": "/api/inventory?resource=printers"
+    },
+    {
+      "source": "/api/approved-emails/:id",
+      "destination": "/api/inventory?resource=approved-emails&id=:id"
+    },
+    {
+      "source": "/api/approved-emails",
+      "destination": "/api/inventory?resource=approved-emails"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ]
 }
