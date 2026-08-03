@@ -56,10 +56,30 @@ function handleHealth(req: VercelRequest, res: VercelResponse) {
   const url = process.env.SUPABASE_URL ?? "";
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   const anonKey = process.env.SUPABASE_ANON_KEY ?? "";
+  const sessionSecret = process.env.SESSION_SECRET ?? "";
+  const googleId = process.env.GOOGLE_CLIENT_ID ?? "";
+  const googleSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
+
   const hasUrl = Boolean(url.trim());
   const hasServiceRoleKey = Boolean(serviceKey.trim());
   const hasAnonKey = Boolean(anonKey.trim());
-  const ok = hasUrl && hasServiceRoleKey;
+  const hasSessionSecret = sessionSecret.trim().length >= 16;
+  const hasGoogleId = Boolean(googleId.trim());
+  const hasGoogleSecret = Boolean(googleSecret.trim());
+
+  const ok =
+    hasUrl &&
+    hasServiceRoleKey &&
+    hasSessionSecret &&
+    hasGoogleId &&
+    hasGoogleSecret;
+
+  const missing: string[] = [];
+  if (!hasUrl) missing.push("SUPABASE_URL");
+  if (!hasServiceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (!hasSessionSecret) missing.push("SESSION_SECRET");
+  if (!hasGoogleId) missing.push("GOOGLE_CLIENT_ID");
+  if (!hasGoogleSecret) missing.push("GOOGLE_CLIENT_SECRET");
 
   return res.status(ok ? 200 : 503).json({
     ok,
@@ -79,11 +99,31 @@ function handleHealth(req: VercelRequest, res: VercelResponse) {
         present: hasAnonKey,
         length: anonKey.trim().length,
       },
+      SESSION_SECRET: {
+        present: Boolean(sessionSecret.trim()),
+        length: sessionSecret.trim().length,
+        longEnough: hasSessionSecret,
+      },
+      GOOGLE_CLIENT_ID: {
+        present: hasGoogleId,
+        length: googleId.trim().length,
+      },
+      GOOGLE_CLIENT_SECRET: {
+        present: hasGoogleSecret,
+        length: googleSecret.trim().length,
+      },
     },
+    missing,
     hint: ok
-      ? "Supabase env vars look present. If API routes still fail, check table setup and redeploy."
-      : "One or more required env vars are missing. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, then Redeploy.",
-    requiredNames: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"],
+      ? "Required env vars look present. If sign-in still fails, check Google redirect URI and approved_emails table."
+      : `Missing or invalid env vars: ${missing.join(", ")}. Add them under Vercel → Settings → Environment Variables (Production + Preview), then Redeploy.`,
+    requiredNames: [
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "SESSION_SECRET",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+    ],
   });
 }
 

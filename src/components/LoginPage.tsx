@@ -43,10 +43,18 @@ export function LoginPage() {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Sign-in failed. Try again.";
-      // Surface allowlist denials cleanly
+      // Surface common production misconfigurations cleanly
       if (/not_approved|not on the approved/i.test(message)) {
         setError(
           "That Google account is not approved for StockTag. Ask an admin to add your email.",
+        );
+      } else if (/missing_session_secret|session secret|SESSION_SECRET/i.test(message)) {
+        setError(
+          "Sign-in is misconfigured on the server (SESSION_SECRET). Add SESSION_SECRET in Vercel env vars and redeploy.",
+        );
+      } else if (/allowlist_error|SUPABASE_/i.test(message)) {
+        setError(
+          "Could not verify access list. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on Vercel, then redeploy.",
         );
       } else if (/popup|blocked/i.test(message)) {
         setError(

@@ -7,6 +7,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { getProvider } from "../_lib/oauth-providers.js";
 import { getOrigin, getRedirectUri } from "../_lib/redirect-uri.js";
 import { mintExchangeToken, setSession, type SessionPayload } from "../_lib/session.js";
+// Static import so Vercel NFT always bundles the allowlist helper with this function.
+import { ensureApprovedForSignIn } from "../../_lib/require-auth.js";
 
 const STATE_COOKIE_PREFIX = "oauth_state_";
 const VERIFIER_COOKIE_PREFIX = "oauth_verifier_";
@@ -16,38 +18,42 @@ const RETURN_TO_COOKIE_PREFIX = "oauth_return_to_";
  * Complete the OAuth flow: exchange the auth code for tokens, fetch
  * the user profile, set the session cookie, and conclude.
  *
- * Two conclusion modes, distinguished by whether `start.ts`
- * persisted a `returnTo` cookie:
- *
- *   - **Popup mode (default)**: render an HTML page that calls
- *     `window.opener.postMessage` and `window.close()` so the
- *     parent React app can refetch `/api/auth/me` and update its
- *     UI. This is the path the popup-flow client takes.
- *   - **Redirect mode**: 302 to the saved `returnTo` path. The
- *     client takes this path when `window.open` was blocked by
- *     the browser and `auth-popup.ts` had to swap to a top-level
- *     navigation. The session cookie is set the same way; only the
- *     conclusion shape differs.
- *
- * The mode is server-controlled (presence of the start-time cookie),
- * which means a client can't crash one mode into the other -- the
- * worst a stale `?returnTo=` query param could do is be silently
- * ignored if start.ts already rejected it.
+ * Top-level try/catch prevents uncaught throws (e.g. missing
+ * SESSION_SECRET inside setSession) from becoming FUNCTION_INVOCATION_FAILED.
  */
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  // Resolve the popup's own origin once at the top so every
-  // `postMessage` -- success and error -- can scope its
-  // `targetOrigin` to the opener instead of `"*"`. `auth-popup.ts`
-  // opens the popup via a relative URL, so the popup's origin equals
-  // the opener's origin; if header derivation fails (no Host header
-  // at all, exotic proxy chain) we fall back to `"*"` so sign-in
-  // doesn't break entirely -- the HMAC-signed exchange token's 60s
-  // TTL still bounds replay risk on that degraded path.
   const targetOrigin = getOrigin(req) ?? "*";
+  try {
+    return await handleCallback(req, res, targetOrigin);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Unexpected error during Google sign-in.";
+    return renderError(res, targetOrigin, "callback_crashed", message.slice(0, 500));
+  }
+}
 
+async function handleCallback(
+  req: IncomingMessage,
+  res: ServerResponse,
+  targetOrigin: string,
+) {
   const provider = getProvider("google");
   if (!provider) {
     return renderError(res, targetOrigin, "provider_not_configured", "Provider is not configured.");
+  }
+
+  // Fail fast with a readable error instead of throwing inside setSession
+  // (missing SESSION_SECRET was causing FUNCTION_INVOCATION_FAILED on Vercel).
+  const sessionSecret = (process.env.SESSION_SECRET ?? "").trim();
+  if (!sessionSecret || sessionSecret.length < 16) {
+    return renderError(
+      res,
+      targetOrigin,
+      "missing_session_secret",
+      "SESSION_SECRET is missing or too short in this deployment. " +
+        "In Vercel → Project → Settings → Environment Variables, add SESSION_SECRET " +
+        "(a random string, 32+ characters), enable Production + Preview, then Redeploy.",
+    );
   }
 
   const url = new URL(`http://x${req.url ?? ""}`); // origin is dummy; we only need search params
@@ -117,7 +123,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   // Only approved Google emails may receive a session cookie.
   // First successful sign-in bootstraps the allowlist as admin when empty.
   try {
-    const { ensureApprovedForSignIn } = await import("../../_lib/require-auth.js");
     const gate = await ensureApprovedForSignIn({
       email: profile.email,
       name: profile.name,
@@ -141,7 +146,18 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     iat: now,
     exp: now + 60 * 60 * 24 * 7,
   };
-  await setSession(res, payload);
+  try {
+    await setSession(res, payload);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to create session cookie.";
+    return renderError(
+      res,
+      targetOrigin,
+      "session_create_failed",
+      `${message}. Ensure SESSION_SECRET is set in Vercel (Production + Preview) and redeploy.`,
+    );
+  }
 
   // Mint a short-lived HMAC-signed exchange token so the AppBuilder
   // iframe (which lives in a different cookie partition than this
