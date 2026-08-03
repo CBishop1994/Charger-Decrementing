@@ -56,10 +56,17 @@ function qrMagnification(heightDots: number, dpi: number): number {
   return Math.min(10, Math.max(3, mag || (dpi >= 300 ? 4 : 3)));
 }
 
-/** Build a compact asset-tag ZPL label with a QR code. */
+/** Default shop-floor label: 4×2 in (101.6 × 50.8 mm) @ 203 dpi — ZT411 common. */
+export const DEFAULT_LABEL_SIZE: LabelSize = {
+  widthMm: 101.6,
+  heightMm: 50.8,
+  dpi: 203,
+};
+
+/** Build a compact asset-tag ZPL label with a QR code. Tuned for 4×2" labels. */
 export function buildAssetTagZpl(
   payload: AssetTagPayload,
-  size: LabelSize = { widthMm: 50, heightMm: 25, dpi: 203 },
+  size: LabelSize = DEFAULT_LABEL_SIZE,
 ): string {
   const dpi = size.dpi ?? 203;
   const width = mmToDots(size.widthMm, dpi);
@@ -72,52 +79,71 @@ export function buildAssetTagZpl(
   const subtitle = escapeZpl(payload.subtitle || "");
   const footer = escapeZpl(payload.footer || "");
 
+  // Scale type from label height so 4×2" (≈406 dots @ 203dpi) stays readable
+  // while smaller tags still fit.
+  const scale = Math.max(0.75, Math.min(1.35, height / 400));
+  const pad = Math.round(20 * scale);
+  const titleH = Math.round(36 * scale);
+  const subH = Math.round(24 * scale);
+  const tagH = Math.round(42 * scale);
+  const fieldH = Math.round(22 * scale);
+  const footerH = Math.round(18 * scale);
+
   const mag = qrMagnification(height, dpi);
   const qrSide = mag * 29;
-  const qrX = Math.max(16, width - qrSide - 16);
-  const qrY = Math.max(12, Math.round((height - qrSide) / 2));
-  const textMaxX = qrX - 12;
+  const qrX = Math.max(pad, width - qrSide - pad);
+  const qrY = Math.max(pad, Math.round((height - qrSide) / 2));
+  const textMaxX = qrX - pad;
+  const textW = Math.max(80, textMaxX - pad);
 
   const lines: string[] = [
     "^XA",
+    // ZT411-friendly defaults
     "^CI28",
+    "^PW" + width,
+    "^LL" + height,
+    "^LH0,0",
+    "^LT0",
+    "^LS0",
+    // Do not override media type (^MN) — keep the ZT411's calibrated gap/mark setting
     "^PR4,4",
     "^MD15",
-    `^PW${width}`,
-    `^LL${height}`,
-    "^LH0,0",
-    `^FO16,12^A0N,26,26^FB${textMaxX - 16},2,0,L,0^FD${title}^FS`,
+    // Start fresh format
+    `^FO${pad},${pad}^A0N,${titleH},${titleH}^FB${textW},2,0,L,0^FD${title}^FS`,
   ];
 
-  let y = 44;
+  let y = pad + titleH + Math.round(10 * scale);
   if (subtitle) {
     lines.push(
-      `^FO16,${y}^A0N,18,18^FB${textMaxX - 16},1,0,L,0^FD${subtitle}^FS`,
+      `^FO${pad},${y}^A0N,${subH},${subH}^FB${textW},1,0,L,0^FD${subtitle}^FS`,
     );
-    y += 24;
+    y += subH + Math.round(8 * scale);
   }
 
   lines.push(
-    `^FO16,${y}^A0N,28,28^FB${textMaxX - 16},1,0,L,0^FD${tag}^FS`,
+    `^FO${pad},${y}^A0N,${tagH},${tagH}^FB${textW},1,0,L,0^FD${tag}^FS`,
   );
-  y += 34;
+  y += tagH + Math.round(12 * scale);
 
   for (const field of payload.fields ?? []) {
-    if (y > height - 28) break;
+    if (y > height - footerH - pad * 2) break;
     lines.push(
-      `^FO16,${y}^A0N,16,16^FB${textMaxX - 16},1,0,L,0^FD${escapeZpl(field.label)}: ${escapeZpl(field.value)}^FS`,
+      `^FO${pad},${y}^A0N,${fieldH},${fieldH}^FB${textW},1,0,L,0^FD${escapeZpl(field.label)}: ${escapeZpl(field.value)}^FS`,
     );
-    y += 20;
+    y += fieldH + Math.round(6 * scale);
   }
 
-  lines.push(`^FO${qrX},${qrY}^BQN,2,${mag}^FDMA,${qrData}^FS`);
+  // QR — Field Data: QA = automatic mode (most compatible on ZT411)
+  lines.push(`^FO${qrX},${qrY}^BQN,2,${mag}^FDQA,${qrData}^FS`);
 
   if (footer) {
     lines.push(
-      `^FO16,${height - 20}^A0N,14,14^FB${textMaxX - 16},1,0,L,0^FD${footer}^FS`,
+      `^FO${pad},${height - footerH - pad}^A0N,${footerH},${footerH}^FB${textW},1,0,L,0^FD${footer}^FS`,
     );
   }
 
+  // Print quantity 1 for this format block (copies are duplicated by caller)
+  lines.push("^PQ1,0,1,Y");
   lines.push("^XZ");
   return finalizeZpl(lines.join("\n"));
 }

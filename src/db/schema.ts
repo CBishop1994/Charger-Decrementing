@@ -61,8 +61,9 @@ export const printer_settings = pgTable("printer_settings", {
   host: text("host").notNull(),
   port: integer("port").notNull().default(9100),
   protocol: text("protocol").notNull().default("zpl"),
-  label_width_mm: real("label_width_mm").notNull().default(50),
-  label_height_mm: real("label_height_mm").notNull().default(25),
+  // Default 4×2 in (101.6 × 50.8 mm) — common ZT411 stock
+  label_width_mm: real("label_width_mm").notNull().default(101.6),
+  label_height_mm: real("label_height_mm").notNull().default(50.8),
   dpi: integer("dpi").notNull().default(203),
   is_default: boolean("is_default").notNull().default(false),
   notes: text("notes").notNull().default(""),

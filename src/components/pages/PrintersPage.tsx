@@ -53,13 +53,25 @@ type FormState = {
   notes: string;
 };
 
+/** 4×2 in in millimetres — default ZT411 / shop-floor stock. */
+const DEFAULT_WIDTH_MM = "101.6";
+const DEFAULT_HEIGHT_MM = "50.8";
+
+const LABEL_PRESETS = [
+  { id: "4x2", label: "4×2 in (default)", w: "101.6", h: "50.8" },
+  { id: "4x3", label: "4×3 in", w: "101.6", h: "76.2" },
+  { id: "4x1", label: "4×1 in", w: "101.6", h: "25.4" },
+  { id: "3x2", label: "3×2 in", w: "76.2", h: "50.8" },
+  { id: "2x1", label: "2×1 in", w: "50.8", h: "25.4" },
+] as const;
+
 const emptyForm = (): FormState => ({
   name: "",
   host: "",
   port: "9100",
   protocol: "zpl",
-  label_width_mm: "50",
-  label_height_mm: "25",
+  label_width_mm: DEFAULT_WIDTH_MM,
+  label_height_mm: DEFAULT_HEIGHT_MM,
   dpi: "203",
   is_default: false,
   notes: "",
@@ -369,7 +381,7 @@ export function PrintersPage({ onToast }: { onToast: ToastFn }) {
                 id="p-host"
                 value={form.host}
                 onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
-                placeholder="192.168.1.50"
+                placeholder="192.168.96.21"
               />
             </div>
             <div className="space-y-1.5">
@@ -381,11 +393,41 @@ export function PrintersPage({ onToast }: { onToast: ToastFn }) {
                 onChange={(e) => setForm((f) => ({ ...f, port: e.target.value }))}
               />
             </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Label size preset</Label>
+              <div className="flex flex-wrap gap-2">
+                {LABEL_PRESETS.map((p) => {
+                  const active =
+                    form.label_width_mm === p.w && form.label_height_mm === p.h;
+                  return (
+                    <Button
+                      key={p.id}
+                      type="button"
+                      size="sm"
+                      variant={active ? "default" : "outline"}
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          label_width_mm: p.w,
+                          label_height_mm: p.h,
+                        }))
+                      }
+                    >
+                      {p.label}
+                    </Button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Default is <strong>4×2 in</strong> (101.6 × 50.8 mm) for ZT411 stock.
+              </p>
+            </div>
             <div className="space-y-1.5">
-              <Label htmlFor="p-w">Label width (mm)</Label>
+              <Label htmlFor="p-w">Width (mm)</Label>
               <Input
                 id="p-w"
                 type="number"
+                step="0.1"
                 value={form.label_width_mm}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, label_width_mm: e.target.value }))
@@ -393,10 +435,11 @@ export function PrintersPage({ onToast }: { onToast: ToastFn }) {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="p-h">Label height (mm)</Label>
+              <Label htmlFor="p-h">Height (mm)</Label>
               <Input
                 id="p-h"
                 type="number"
+                step="0.1"
                 value={form.label_height_mm}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, label_height_mm: e.target.value }))
@@ -411,6 +454,9 @@ export function PrintersPage({ onToast }: { onToast: ToastFn }) {
                 value={form.dpi}
                 onChange={(e) => setForm((f) => ({ ...f, dpi: e.target.value }))}
               />
+              <p className="text-[11px] text-muted-foreground">
+                ZT411 is usually 203 or 300 dpi
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="p-proto">Protocol</Label>

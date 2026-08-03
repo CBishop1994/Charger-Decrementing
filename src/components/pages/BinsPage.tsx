@@ -225,8 +225,8 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
     } catch {
       const printer = printers.find((p) => String(p.id) === printPrinterId);
       const zpl = buildBinLocationLabelZpl(printBin, {
-        widthMm: printer?.label_width_mm ?? 50,
-        heightMm: printer?.label_height_mm ?? 25,
+        widthMm: printer?.label_width_mm ?? 101.6,
+        heightMm: printer?.label_height_mm ?? 50.8,
         dpi: printer?.dpi ?? 203,
       });
       const one = finalizeZpl(zpl).replace(/\r\n$/, "");
