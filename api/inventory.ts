@@ -1546,6 +1546,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (resource === "print") {
       return await handlePrint(req, res);
     }
+    if (resource === "scan") {
+      return await handleScan(req, res, auth as Auth);
+    }
     if (resource === "approved-emails") {
       return await handleApprovedEmails(req, res, auth as Auth, id);
     }
