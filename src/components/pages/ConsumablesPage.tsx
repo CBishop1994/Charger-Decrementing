@@ -102,9 +102,10 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustItem, setAdjustItem] = useState<Consumable | null>(null);
   const [adjustDelta, setAdjustDelta] = useState("1");
-  const [adjustMode, setAdjustMode] = useState<"use" | "restock">("use");
   const [adjustNote, setAdjustNote] = useState("");
   const [adjusting, setAdjusting] = useState(false);
+  /** Row id currently running a one-click use (−1). */
+  const [usingId, setUsingId] = useState<number | null>(null);
 
   const [printOpen, setPrintOpen] = useState(false);
   const [printItem, setPrintItem] = useState<Consumable | null>(null);
@@ -229,22 +230,77 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
     }
   };
 
-  const openAdjust = (item: Consumable, mode: "use" | "restock") => {
+  /** One-click use: always subtract exactly 1 — no quantity prompt. */
+  const quickUse = async (item: Consumable) => {
+    if (item.quantity <= 0) {
+      onToast({
+        title: "Already out of stock",
+        description: item.name,
+        variant: "destructive",
+      });
+      return;
+    }
+    if (usingId != null) return;
+    setUsingId(item.id);
+    // Optimistic UI: drop qty by 1 immediately, then reconcile with server.
+    setItems((prev) =>
+      prev.map((row) =>
+        row.id === item.id
+          ? { ...row, quantity: Math.max(0, row.quantity - 1) }
+          : row,
+      ),
+    );
+    try {
+      const res = await api.post<{
+        consumable: Consumable;
+        low_stock: boolean;
+        out_of_stock: boolean;
+      }>(`/api/consumables/${item.id}/adjust`, {
+        delta: -1,
+        reason: "use",
+        note: "",
+      });
+      setItems((prev) =>
+        prev.map((row) => (row.id === item.id ? res.consumable : row)),
+      );
+      onToast({
+        title: `Used 1 ${item.unit}`,
+        description: res.out_of_stock
+          ? `${item.name} is now out of stock`
+          : res.low_stock
+            ? `${item.name} is at or below minimum`
+            : `${item.name} · qty ${res.consumable.quantity}`,
+        variant: res.out_of_stock || res.low_stock ? "default" : "success",
+      });
+    } catch (err) {
+      // Roll back optimistic update
+      setItems((prev) =>
+        prev.map((row) => (row.id === item.id ? item : row)),
+      );
+      onToast({
+        title: "Could not subtract",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setUsingId(null);
+    }
+  };
+
+  const openRestock = (item: Consumable) => {
     setAdjustItem(item);
-    setAdjustMode(mode);
     setAdjustDelta("1");
     setAdjustNote("");
     setAdjustOpen(true);
   };
 
-  const submitAdjust = async () => {
+  const submitRestock = async () => {
     if (!adjustItem) return;
     const amount = Math.abs(Math.trunc(Number(adjustDelta) || 0));
     if (!amount) {
       onToast({ title: "Enter a quantity", variant: "destructive" });
       return;
     }
-    const delta = adjustMode === "use" ? -amount : amount;
     setAdjusting(true);
     try {
       const res = await api.post<{
@@ -252,27 +308,20 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
         low_stock: boolean;
         out_of_stock: boolean;
       }>(`/api/consumables/${adjustItem.id}/adjust`, {
-        delta,
-        reason: adjustMode === "use" ? "use" : "restock",
+        delta: amount,
+        reason: "restock",
         note: adjustNote.trim(),
       });
       onToast({
-        title:
-          adjustMode === "use"
-            ? `Used ${amount} ${adjustItem.unit}`
-            : `Restocked ${amount} ${adjustItem.unit}`,
-        description: res.out_of_stock
-          ? "Now out of stock"
-          : res.low_stock
-            ? "Now at or below minimum level"
-            : `New qty: ${res.consumable.quantity}`,
-        variant: res.out_of_stock || res.low_stock ? "default" : "success",
+        title: `Restocked ${amount} ${adjustItem.unit}`,
+        description: `New qty: ${res.consumable.quantity}`,
+        variant: "success",
       });
       setAdjustOpen(false);
       await load();
     } catch (err) {
       onToast({
-        title: "Adjustment failed",
+        title: "Restock failed",
         description: err instanceof Error ? err.message : "Unknown error",
         variant: "destructive",
       });
@@ -505,8 +554,9 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                             size="sm"
                             variant="outline"
                             className="h-8 px-2"
-                            onClick={() => openAdjust(item, "use")}
-                            title="Use / decrement"
+                            onClick={() => void quickUse(item)}
+                            disabled={item.quantity <= 0 || usingId === item.id}
+                            title="Use 1"
                           >
                             <Minus className="h-3.5 w-3.5" />
                           </Button>
@@ -514,7 +564,7 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                             size="sm"
                             variant="outline"
                             className="h-8 px-2"
-                            onClick={() => openAdjust(item, "restock")}
+                            onClick={() => openRestock(item)}
                             title="Restock"
                           >
                             <Plus className="h-3.5 w-3.5" />
@@ -688,13 +738,11 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
         </DialogContent>
       </Dialog>
 
-      {/* Adjust stock */}
+      {/* Restock (quantity prompt). Use is one-click −1 via the minus button. */}
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {adjustMode === "use" ? "Use / decrement" : "Restock"}
-            </DialogTitle>
+            <DialogTitle>Restock</DialogTitle>
             <DialogDescription>
               {adjustItem
                 ? `${adjustItem.name} · on hand ${adjustItem.quantity} ${adjustItem.unit} (min ${adjustItem.min_level})`
@@ -702,28 +750,8 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant={adjustMode === "use" ? "default" : "outline"}
-                className="flex-1"
-                onClick={() => setAdjustMode("use")}
-              >
-                <Minus className="mr-2 h-4 w-4" />
-                Use
-              </Button>
-              <Button
-                type="button"
-                variant={adjustMode === "restock" ? "default" : "outline"}
-                className="flex-1"
-                onClick={() => setAdjustMode("restock")}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Restock
-              </Button>
-            </div>
             <div className="space-y-1.5">
-              <Label htmlFor="adj-qty">Quantity</Label>
+              <Label htmlFor="adj-qty">Quantity to add</Label>
               <Input
                 id="adj-qty"
                 type="number"
@@ -738,19 +766,15 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                 id="adj-note"
                 value={adjustNote}
                 onChange={(e) => setAdjustNote(e.target.value)}
-                placeholder="Job #, line, reason…"
+                placeholder="PO #, delivery, reason…"
               />
             </div>
             {adjustItem ? (
               <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
                 New quantity will be{" "}
                 <span className="font-semibold text-foreground tabular-nums">
-                  {Math.max(
-                    0,
-                    adjustItem.quantity +
-                      (adjustMode === "use" ? -1 : 1) *
-                        Math.abs(Math.trunc(Number(adjustDelta) || 0)),
-                  )}
+                  {adjustItem.quantity +
+                    Math.abs(Math.trunc(Number(adjustDelta) || 0))}
                 </span>
               </p>
             ) : null}
@@ -759,8 +783,8 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
             <Button variant="outline" onClick={() => setAdjustOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={() => void submitAdjust()} disabled={adjusting}>
-              {adjusting ? "Saving…" : "Confirm"}
+            <Button onClick={() => void submitRestock()} disabled={adjusting}>
+              {adjusting ? "Saving…" : "Add stock"}
             </Button>
           </DialogFooter>
         </DialogContent>
