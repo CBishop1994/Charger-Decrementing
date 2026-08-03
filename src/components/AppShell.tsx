@@ -7,6 +7,7 @@ import {
   Moon,
   Package,
   Printer,
+  ScanLine,
   Shield,
   Sun,
   History,
@@ -19,6 +20,7 @@ import { useAuth } from "@/lib/auth/use-auth";
 
 export type AppView =
   | "dashboard"
+  | "scan"
   | "consumables"
   | "bins"
   | "printers"
@@ -36,6 +38,12 @@ const NAV: Array<{
     label: "Dashboard",
     icon: LayoutDashboard,
     description: "Stock health overview",
+  },
+  {
+    id: "scan",
+    label: "Scan",
+    icon: ScanLine,
+    description: "Scan tag → use 1",
   },
   {
     id: "consumables",

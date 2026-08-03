@@ -18,6 +18,10 @@
       "destination": "/api/inventory?resource=print"
     },
     {
+      "source": "/api/scan",
+      "destination": "/api/inventory?resource=scan"
+    },
+    {
       "source": "/api/transactions",
       "destination": "/api/inventory?resource=transactions"
     },

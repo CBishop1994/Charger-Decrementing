@@ -56,7 +56,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const obj =
       data && typeof data === "object" && data !== null
-        ? (data as { error?: unknown; code?: unknown })
+        ? (data as {
+            error?: unknown;
+            code?: unknown;
+            hint?: unknown;
+            consumable?: unknown;
+            scanned?: unknown;
+          })
         : null;
     const err =
       obj && "error" in obj && obj.error != null
@@ -64,7 +70,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         : `Request failed (${res.status})`;
     const code =
       obj && typeof obj.code === "string" ? obj.code : undefined;
-    throw new ApiError(err, res.status, code);
+    const hint =
+      obj && typeof obj.hint === "string" ? obj.hint : undefined;
+    const details: Record<string, unknown> = {};
+    if (obj && "consumable" in obj) details.consumable = obj.consumable;
+    if (obj && "scanned" in obj) details.scanned = obj.scanned;
+    throw new ApiError(
+      err,
+      res.status,
+      code,
+      hint,
+      Object.keys(details).length ? details : undefined,
+    );
   }
 
   return data as T;
@@ -154,4 +171,16 @@ export type ApprovedEmail = {
   created_by: string;
   notes: string;
   created_at: string | null;
+};
+
+export type ScanResult = {
+  ok: boolean;
+  consumable: Consumable;
+  transaction?: StockTransaction;
+  low_stock: boolean;
+  out_of_stock: boolean;
+  scanned: string;
+  previous_quantity?: number;
+  new_quantity?: number;
+  dry_run?: boolean;
 };

@@ -4,6 +4,7 @@ import { AppShell, type AppView } from "@/components/AppShell";
 import { ToastStack } from "@/components/ToastStack";
 import { LoginPage } from "@/components/LoginPage";
 import { DashboardPage } from "@/components/pages/DashboardPage";
+import { ScanPage } from "@/components/pages/ScanPage";
 import { ConsumablesPage } from "@/components/pages/ConsumablesPage";
 import { BinsPage } from "@/components/pages/BinsPage";
 import { PrintersPage } from "@/components/pages/PrintersPage";
@@ -58,6 +59,7 @@ function AuthenticatedApp() {
             onGoBins={() => setView("bins")}
           />
         ) : null}
+        {view === "scan" ? <ScanPage onToast={onToast} /> : null}
         {view === "consumables" ? (
           <ConsumablesPage onToast={onToast} />
         ) : null}

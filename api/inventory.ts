@@ -1164,6 +1164,150 @@ async function handlePrint(req: VercelRequest, res: VercelResponse) {
 }
 
 /* ------------------------------------------------------------------ */
+/* scan → lookup by asset tag / SKU and subtract 1                     */
+/* ------------------------------------------------------------------ */
+
+function escapeIlike(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+async function findConsumableByScanCode(code: string) {
+  const raw = String(code ?? "").trim();
+  if (!raw) return null;
+
+  // Prefer exact asset_tag, then SKU (case-insensitive equality via ilike).
+  const escaped = escapeIlike(raw);
+  const { data: byTag, error: tagErr } = await supabaseAdmin
+    .from("consumables")
+    .select("*")
+    .ilike("asset_tag", escaped)
+    .limit(5);
+  if (tagErr) throw tagErr;
+  if (byTag && byTag.length > 0) {
+    const lower = raw.toLowerCase();
+    return (
+      byTag.find((r) => String(r.asset_tag ?? "").toLowerCase() === lower) ??
+      byTag[0]
+    );
+  }
+
+  const { data: bySku, error: skuErr } = await supabaseAdmin
+    .from("consumables")
+    .select("*")
+    .ilike("sku", escaped)
+    .limit(5);
+  if (skuErr) throw skuErr;
+  if (bySku && bySku.length > 0) {
+    const lower = raw.toLowerCase();
+    return (
+      bySku.find((r) => String(r.sku ?? "").toLowerCase() === lower) ?? bySku[0]
+    );
+  }
+
+  return null;
+}
+
+async function handleScan(
+  req: VercelRequest,
+  res: VercelResponse,
+  auth: Auth,
+) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const body = req.body ?? {};
+  const code = String(body.code ?? body.asset_tag ?? body.sku ?? "").trim();
+  if (!code) {
+    return res.status(400).json({
+      error: "Scan code is required",
+      code: "MISSING_CODE",
+    });
+  }
+
+  // Optional: lookup-only (preview) without decrementing
+  const dryRun = Boolean(body.dry_run || body.lookup_only);
+  const note = String(body.note ?? "scanned").trim() || "scanned";
+
+  let item;
+  try {
+    item = await findConsumableByScanCode(code);
+  } catch (err) {
+    return sendDbError(res, err);
+  }
+
+  if (!item) {
+    return res.status(404).json({
+      error: `No consumable found for “${code}”`,
+      code: "NOT_FOUND",
+      scanned: code,
+    });
+  }
+
+  if (dryRun) {
+    return res.status(200).json({
+      ok: true,
+      dry_run: true,
+      consumable: item,
+      low_stock:
+        Number(item.quantity) > 0 &&
+        Number(item.quantity) <= Number(item.min_level),
+      out_of_stock: Number(item.quantity) <= 0,
+      scanned: code,
+    });
+  }
+
+  const previous = Number(item.quantity) || 0;
+  if (previous <= 0) {
+    return res.status(409).json({
+      error: `${item.name} is already out of stock`,
+      code: "OUT_OF_STOCK",
+      consumable: item,
+      scanned: code,
+    });
+  }
+
+  const next = previous - 1;
+  const created_by =
+    auth.email || String(body.created_by ?? "scanner").trim() || "scanner";
+
+  const { data: updated, error: updateErr } = await supabaseAdmin
+    .from("consumables")
+    .update({ quantity: next, updated_at: new Date().toISOString() })
+    .eq("id", item.id)
+    .select()
+    .single();
+  if (updateErr) return sendDbError(res, updateErr);
+
+  const { data: tx, error: txErr } = await supabaseAdmin
+    .from("stock_transactions")
+    .insert({
+      consumable_id: item.id,
+      change_amount: -1,
+      previous_quantity: previous,
+      new_quantity: next,
+      reason: "scan",
+      note,
+      created_by,
+    })
+    .select()
+    .single();
+  if (txErr) return sendDbError(res, txErr);
+
+  return res.status(200).json({
+    ok: true,
+    consumable: updated,
+    transaction: tx,
+    low_stock: next > 0 && next <= Number(updated.min_level),
+    out_of_stock: next <= 0,
+    scanned: code,
+    previous_quantity: previous,
+    new_quantity: next,
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /* approved emails                                                     */
 /* ------------------------------------------------------------------ */
 

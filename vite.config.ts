@@ -29,6 +29,10 @@ function inventoryApiRewrites(): Plugin {
       build: () => "/api/inventory?resource=print",
     },
     {
+      pattern: /^\/api\/scan\/?$/,
+      build: () => "/api/inventory?resource=scan",
+    },
+    {
       pattern: /^\/api\/transactions\/?$/,
       build: () => "/api/inventory?resource=transactions",
     },
