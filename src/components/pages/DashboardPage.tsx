@@ -8,12 +8,14 @@ import {
   PackageX,
   RefreshCw,
   Sprout,
+  Truck,
 } from "lucide-react";
 import {
   api,
   isSetupRequiredError,
   type Consumable,
   type DashboardStats,
+  type StockOrder,
 } from "@/lib/api";
 import { downloadRestockReport, qtyNeededToRestock } from "@/lib/restock-report";
 import { StatCard } from "@/components/StatCard";
@@ -36,6 +38,8 @@ type Props = {
 
 type DashData = DashboardStats & {
   low_stock_items?: Array<Record<string, unknown>>;
+  pending_orders?: StockOrder[];
+  pending_orders_count?: number;
 };
 
 export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
@@ -202,7 +206,7 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
         </BlurFade>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <BlurFade delay={0.05}>
               <StatCard
                 label="Total items"
@@ -212,7 +216,7 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
                 hint="Tracked consumables"
               />
             </BlurFade>
-            <BlurFade delay={0.1}>
+            <BlurFade delay={0.08}>
               <StatCard
                 label="Low stock"
                 value={stats?.low_stock_count ?? 0}
@@ -221,7 +225,7 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
                 hint="At or below minimum"
               />
             </BlurFade>
-            <BlurFade delay={0.15}>
+            <BlurFade delay={0.11}>
               <StatCard
                 label="Out of stock"
                 value={stats?.out_of_stock_count ?? 0}
@@ -230,7 +234,16 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
                 hint="Quantity is zero"
               />
             </BlurFade>
-            <BlurFade delay={0.2}>
+            <BlurFade delay={0.14}>
+              <StatCard
+                label="On order"
+                value={stats?.pending_orders_count ?? 0}
+                icon={Truck}
+                tone="default"
+                hint="Awaiting delivery"
+              />
+            </BlurFade>
+            <BlurFade delay={0.17}>
               <StatCard
                 label="Bin locations"
                 value={stats?.total_bins ?? 0}
@@ -240,6 +253,50 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
               />
             </BlurFade>
           </div>
+
+          {(stats?.pending_orders?.length ?? 0) > 0 ? (
+            <BlurFade delay={0.1}>
+              <Card className="border-sky-500/25 bg-sky-500/[0.03]">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                    <Truck className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                    Awaiting delivery
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" onClick={onGoConsumables}>
+                    Open consumables
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(stats?.pending_orders ?? []).slice(0, 8).map((order) => (
+                    <div
+                      key={order.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-card px-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {order.consumable_name || `Item #${order.consumable_id}`}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {order.consumable_sku ? `${order.consumable_sku} · ` : ""}
+                          ordered by {order.ordered_by || "—"}
+                          {order.note ? ` · ${order.note}` : ""}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className="shrink-0 border-sky-500/30 bg-sky-500/10 font-mono text-sky-800 dark:text-sky-300"
+                      >
+                        +{order.quantity_ordered}
+                        {order.consumable_unit
+                          ? ` ${order.consumable_unit}`
+                          : ""}
+                      </Badge>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </BlurFade>
+          ) : null}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <BlurFade delay={0.12}>

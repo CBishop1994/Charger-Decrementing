@@ -38,6 +38,22 @@
       "destination": "/api/inventory?resource=consumables"
     },
     {
+      "source": "/api/stock-orders/:id/deliver",
+      "destination": "/api/inventory?resource=stock-orders&id=:id&action=deliver"
+    },
+    {
+      "source": "/api/stock-orders/:id/cancel",
+      "destination": "/api/inventory?resource=stock-orders&id=:id&action=cancel"
+    },
+    {
+      "source": "/api/stock-orders/:id",
+      "destination": "/api/inventory?resource=stock-orders&id=:id"
+    },
+    {
+      "source": "/api/stock-orders",
+      "destination": "/api/inventory?resource=stock-orders"
+    },
+    {
       "source": "/api/bin-locations/:id",
       "destination": "/api/inventory?resource=bin-locations&id=:id"
     },

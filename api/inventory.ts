@@ -658,6 +658,7 @@ async function handleDashboard(req: VercelRequest, res: VercelResponse) {
     { data: items, error: itemsErr },
     { data: bins, error: binsErr },
     { data: txs, error: txsErr },
+    { data: pendingOrders, error: ordersErr },
   ] = await Promise.all([
     supabaseAdmin
       .from("consumables")
@@ -668,11 +669,21 @@ async function handleDashboard(req: VercelRequest, res: VercelResponse) {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(12),
+    supabaseAdmin
+      .from("stock_orders")
+      .select("*")
+      .eq("status", "ordered")
+      .order("ordered_at", { ascending: false })
+      .limit(20),
   ]);
 
   if (itemsErr) return sendDbError(res, itemsErr);
   if (binsErr) return sendDbError(res, binsErr);
   if (txsErr) return sendDbError(res, txsErr);
+  // Orders table may not exist until schema is pushed — treat as empty
+  const ordersMissing =
+    ordersErr && isMissingTableError(ordersErr.message || String(ordersErr));
+  if (ordersErr && !ordersMissing) return sendDbError(res, ordersErr);
 
   const list = (items ?? []).filter((i) => i.is_active !== false);
   const low = list.filter((i) => i.quantity > 0 && i.quantity <= i.min_level);
@@ -680,17 +691,24 @@ async function handleDashboard(req: VercelRequest, res: VercelResponse) {
   // Preview list: out of stock first, then low — used by dashboard "Needs attention"
   const needsAttention = [...out, ...low].slice(0, 12);
 
+  const orderRows = ordersMissing ? [] : (pendingOrders ?? []);
   const ids = Array.from(
-    new Set((txs ?? []).map((t) => t.consumable_id).filter(Boolean)),
+    new Set([
+      ...(txs ?? []).map((t) => t.consumable_id).filter(Boolean),
+      ...orderRows.map((o) => o.consumable_id).filter(Boolean),
+    ]),
   );
-  const nameMap: Record<number, { name: string; sku: string }> = {};
+  const nameMap: Record<
+    number,
+    { name: string; sku: string; unit: string }
+  > = {};
   if (ids.length) {
     const { data: named } = await supabaseAdmin
       .from("consumables")
-      .select("id,name,sku")
+      .select("id,name,sku,unit")
       .in("id", ids);
     for (const n of named ?? []) {
-      nameMap[n.id] = { name: n.name, sku: n.sku };
+      nameMap[n.id] = { name: n.name, sku: n.sku, unit: n.unit };
     }
   }
 
@@ -700,14 +718,408 @@ async function handleDashboard(req: VercelRequest, res: VercelResponse) {
     consumable_sku: nameMap[t.consumable_id]?.sku,
   }));
 
+  const pending = orderRows.map((o) => ({
+    ...o,
+    consumable_name: nameMap[o.consumable_id]?.name,
+    consumable_sku: nameMap[o.consumable_id]?.sku,
+    consumable_unit: nameMap[o.consumable_id]?.unit,
+  }));
+
   return res.status(200).json({
     total_items: list.length,
     low_stock_count: low.length,
     out_of_stock_count: out.length,
     total_bins: (bins ?? []).length,
+    pending_orders_count: pending.length,
+    pending_orders: pending,
     recent_transactions: recent,
     low_stock_items: low.slice(0, 8),
+    needs_attention: needsAttention,
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* stock orders (ordered → delivered restock)                          */
+/* ------------------------------------------------------------------ */
+
+async function handleStockOrders(
+  req: VercelRequest,
+  res: VercelResponse,
+  auth: Auth,
+  id: number | null,
+  action: string,
+) {
+  const actor =
+    auth.email ||
+    String((req.body ?? {}).created_by ?? "operator").trim() ||
+    "operator";
+
+  // POST /api/stock-orders/:id/deliver
+  if (action === "deliver") {
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+    if (!id) return res.status(400).json({ error: "Valid order id is required" });
+
+    const body = req.body ?? {};
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from("stock_orders")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (orderErr || !order) {
+      if (orderErr && isMissingTableError(orderErr.message)) {
+        return sendDbError(res, orderErr);
+      }
+      return res.status(404).json({ error: orderErr?.message || "Order not found" });
+    }
+
+    if (order.status !== "ordered") {
+      return res.status(409).json({
+        error: `Order is already ${order.status}`,
+        code: "ORDER_NOT_OPEN",
+      });
+    }
+
+    // Quantity received: body override, else ordered amount
+    let receivedRaw = body.quantity_received ?? body.quantity ?? order.quantity_ordered;
+    const received = Math.max(0, Math.trunc(Number(receivedRaw) || 0));
+    if (!Number.isFinite(Number(receivedRaw)) || received <= 0) {
+      return res
+        .status(400)
+        .json({ error: "quantity_received must be a positive whole number" });
+    }
+
+    const noteExtra = String(body.note ?? "").trim();
+
+    const { data: item, error: itemErr } = await supabaseAdmin
+      .from("consumables")
+      .select("*")
+      .eq("id", order.consumable_id)
+      .single();
+
+    if (itemErr || !item) {
+      if (itemErr && isMissingTableError(itemErr.message)) {
+        return sendDbError(res, itemErr);
+      }
+      return res
+        .status(404)
+        .json({ error: itemErr?.message || "Consumable not found for this order" });
+    }
+
+    const previous = Number(item.quantity) || 0;
+    const next = previous + received;
+    const now = new Date().toISOString();
+
+    const { data: updatedItem, error: updItemErr } = await supabaseAdmin
+      .from("consumables")
+      .update({ quantity: next, updated_at: now })
+      .eq("id", item.id)
+      .select()
+      .single();
+    if (updItemErr) return sendDbError(res, updItemErr);
+
+    const varianceNote =
+      received !== Number(order.quantity_ordered)
+        ? ` (ordered ${order.quantity_ordered}, received ${received})`
+        : "";
+    const baseNote = String(order.note || "").trim();
+    const txNote = [baseNote, noteExtra, `Order #${order.id}${varianceNote}`]
+      .filter(Boolean)
+      .join(" · ");
+
+    const { data: tx, error: txErr } = await supabaseAdmin
+      .from("stock_transactions")
+      .insert({
+        consumable_id: item.id,
+        change_amount: received,
+        previous_quantity: previous,
+        new_quantity: next,
+        reason: "order_delivery",
+        note: txNote,
+        created_by: actor,
+      })
+      .select()
+      .single();
+    if (txErr) return sendDbError(res, txErr);
+
+    const { data: updatedOrder, error: updOrderErr } = await supabaseAdmin
+      .from("stock_orders")
+      .update({
+        status: "delivered",
+        quantity_received: received,
+        received_by: actor,
+        delivered_at: now,
+        note: noteExtra
+          ? [baseNote, noteExtra].filter(Boolean).join(" · ")
+          : baseNote,
+      })
+      .eq("id", id)
+      .select()
+      .single();
+    if (updOrderErr) return sendDbError(res, updOrderErr);
+
+    return res.status(200).json({
+      order: updatedOrder,
+      consumable: updatedItem,
+      transaction: tx,
+      previous_quantity: previous,
+      new_quantity: next,
+      quantity_received: received,
+      variance: received - Number(order.quantity_ordered),
+    });
+  }
+
+  // POST /api/stock-orders/:id/cancel
+  if (action === "cancel") {
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+    if (!id) return res.status(400).json({ error: "Valid order id is required" });
+
+    const body = req.body ?? {};
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from("stock_orders")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (orderErr || !order) {
+      if (orderErr && isMissingTableError(orderErr.message)) {
+        return sendDbError(res, orderErr);
+      }
+      return res.status(404).json({ error: orderErr?.message || "Order not found" });
+    }
+
+    if (order.status !== "ordered") {
+      return res.status(409).json({
+        error: `Order is already ${order.status}`,
+        code: "ORDER_NOT_OPEN",
+      });
+    }
+
+    const cancelNote = String(body.note ?? "").trim();
+    const combinedNote = [String(order.note || "").trim(), cancelNote]
+      .filter(Boolean)
+      .join(" · ");
+
+    const { data, error } = await supabaseAdmin
+      .from("stock_orders")
+      .update({
+        status: "cancelled",
+        note: combinedNote,
+      })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) return sendDbError(res, error);
+    return res.status(200).json(data);
+  }
+
+  // Item routes
+  if (id != null) {
+    if (req.method === "GET") {
+      const { data, error } = await supabaseAdmin
+        .from("stock_orders")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (error) {
+        if (isMissingTableError(error.message)) return sendDbError(res, error);
+        return res.status(404).json({ error: error.message });
+      }
+      return res.status(200).json(data);
+    }
+
+    if (req.method === "PATCH") {
+      const body = req.body ?? {};
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from("stock_orders")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (fetchErr || !existing) {
+        if (fetchErr && isMissingTableError(fetchErr.message)) {
+          return sendDbError(res, fetchErr);
+        }
+        return res
+          .status(404)
+          .json({ error: fetchErr?.message || "Order not found" });
+      }
+      if (existing.status !== "ordered") {
+        return res.status(409).json({
+          error: "Only open (ordered) orders can be edited",
+          code: "ORDER_NOT_OPEN",
+        });
+      }
+
+      const updates: Record<string, unknown> = {};
+      if (body.quantity_ordered !== undefined) {
+        const q = Math.trunc(Number(body.quantity_ordered) || 0);
+        if (q <= 0) {
+          return res
+            .status(400)
+            .json({ error: "quantity_ordered must be a positive whole number" });
+        }
+        updates.quantity_ordered = q;
+      }
+      if (body.note !== undefined) updates.note = String(body.note).trim();
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No valid fields to update" });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from("stock_orders")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) return sendDbError(res, error);
+      return res.status(200).json(data);
+    }
+
+    if (req.method === "DELETE") {
+      // Soft-cancel preferred; hard delete only for ordered
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from("stock_orders")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (fetchErr || !existing) {
+        if (fetchErr && isMissingTableError(fetchErr.message)) {
+          return sendDbError(res, fetchErr);
+        }
+        return res
+          .status(404)
+          .json({ error: fetchErr?.message || "Order not found" });
+      }
+      if (existing.status === "delivered") {
+        return res.status(409).json({
+          error: "Delivered orders cannot be deleted",
+          code: "ORDER_DELIVERED",
+        });
+      }
+      const { error } = await supabaseAdmin
+        .from("stock_orders")
+        .delete()
+        .eq("id", id);
+      if (error) return sendDbError(res, error);
+      return res.status(200).json({ ok: true });
+    }
+
+    res.setHeader("Allow", "GET, PATCH, DELETE");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  // Collection
+  if (req.method === "GET") {
+    const status = qStr(req.query.status).trim() || "all";
+    const consumableIdRaw = qStr(req.query.consumable_id).trim();
+    const consumableId = consumableIdRaw ? Number(consumableIdRaw) : NaN;
+
+    let query = supabaseAdmin
+      .from("stock_orders")
+      .select("*")
+      .order("ordered_at", { ascending: false })
+      .limit(200);
+
+    if (status !== "all") query = query.eq("status", status);
+    if (Number.isFinite(consumableId) && consumableId > 0) {
+      query = query.eq("consumable_id", consumableId);
+    }
+
+    const { data, error } = await query;
+    if (error) return sendDbError(res, error);
+
+    const rows = data ?? [];
+    const cids = Array.from(
+      new Set(rows.map((r) => r.consumable_id).filter(Boolean)),
+    );
+    const nameMap: Record<
+      number,
+      { name: string; sku: string; unit: string }
+    > = {};
+    if (cids.length) {
+      const { data: named } = await supabaseAdmin
+        .from("consumables")
+        .select("id,name,sku,unit")
+        .in("id", cids);
+      for (const n of named ?? []) {
+        nameMap[n.id] = { name: n.name, sku: n.sku, unit: n.unit };
+      }
+    }
+
+    return res.status(200).json(
+      rows.map((r) => ({
+        ...r,
+        consumable_name: nameMap[r.consumable_id]?.name,
+        consumable_sku: nameMap[r.consumable_id]?.sku,
+        consumable_unit: nameMap[r.consumable_id]?.unit,
+      })),
+    );
+  }
+
+  if (req.method === "POST") {
+    const body = req.body ?? {};
+    const consumable_id = Number(body.consumable_id);
+    if (!Number.isFinite(consumable_id) || consumable_id <= 0) {
+      return res.status(400).json({ error: "consumable_id is required" });
+    }
+
+    const quantity_ordered = Math.trunc(Number(body.quantity_ordered ?? body.quantity) || 0);
+    if (quantity_ordered <= 0) {
+      return res
+        .status(400)
+        .json({ error: "quantity_ordered must be a positive whole number" });
+    }
+
+    const note = String(body.note ?? "").trim();
+
+    // Ensure consumable exists
+    const { data: item, error: itemErr } = await supabaseAdmin
+      .from("consumables")
+      .select("id,name,sku,unit")
+      .eq("id", consumable_id)
+      .single();
+    if (itemErr || !item) {
+      if (itemErr && isMissingTableError(itemErr.message)) {
+        return sendDbError(res, itemErr);
+      }
+      return res.status(404).json({ error: "Consumable not found" });
+    }
+
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from("stock_orders")
+      .insert({
+        consumable_id,
+        quantity_ordered,
+        quantity_received: null,
+        status: "ordered",
+        note,
+        ordered_by: actor,
+        received_by: "",
+        ordered_at: now,
+        delivered_at: null,
+      })
+      .select()
+      .single();
+    if (error) return sendDbError(res, error);
+
+    return res.status(201).json({
+      ...data,
+      consumable_name: item.name,
+      consumable_sku: item.sku,
+      consumable_unit: item.unit,
+    });
+  }
+
+  res.setHeader("Allow", "GET, POST");
+  return res.status(405).json({ error: "Method not allowed" });
 }
 
 const SAMPLE_BINS = [

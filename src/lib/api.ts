@@ -113,6 +113,25 @@ export type Consumable = {
   created_at: string | null;
 };
 
+/** Purchase / replenishment order for a consumable. */
+export type StockOrder = {
+  id: number;
+  consumable_id: number;
+  quantity_ordered: number;
+  quantity_received: number | null;
+  status: "ordered" | "delivered" | "cancelled" | string;
+  note: string;
+  ordered_by: string;
+  received_by: string;
+  ordered_at: string | null;
+  delivered_at: string | null;
+  created_at: string | null;
+  /** Populated on list/dashboard responses when available. */
+  consumable_name?: string;
+  consumable_sku?: string;
+  consumable_unit?: string;
+};
+
 export type StockTransaction = {
   id: number;
   consumable_id: number;
@@ -158,6 +177,8 @@ export type DashboardStats = {
   low_stock_count: number;
   out_of_stock_count: number;
   total_bins: number;
+  pending_orders_count?: number;
+  pending_orders?: StockOrder[];
   recent_transactions: Array<
     StockTransaction & { consumable_name?: string; consumable_sku?: string }
   >;

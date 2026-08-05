@@ -39,6 +39,27 @@ export const stock_transactions = pgTable("stock_transactions", {
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+/**
+ * Purchase / replenishment orders for consumables.
+ * Flow: ordered (qty pending) → delivered (stock increased) | cancelled.
+ */
+export const stock_orders = pgTable("stock_orders", {
+  id: serial("id").primaryKey(),
+  consumable_id: integer("consumable_id").notNull(),
+  /** Quantity requested / placed with supplier. */
+  quantity_ordered: integer("quantity_ordered").notNull(),
+  /** Quantity actually received on delivery (may differ). Null until delivered. */
+  quantity_received: integer("quantity_received"),
+  /** ordered | delivered | cancelled */
+  status: text("status").notNull().default("ordered"),
+  note: text("note").notNull().default(""),
+  ordered_by: text("ordered_by").notNull().default("operator"),
+  received_by: text("received_by").notNull().default(""),
+  ordered_at: timestamp("ordered_at", { withTimezone: true }).defaultNow(),
+  delivered_at: timestamp("delivered_at", { withTimezone: true }),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
 /** Physical bin / shelf locations that can receive location asset tags. */
 export const bin_locations = pgTable("bin_locations", {
   id: serial("id").primaryKey(),

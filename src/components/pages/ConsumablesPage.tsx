@@ -1,19 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
+  ClipboardList,
   Download,
   FileSpreadsheet,
   Minus,
   MoreHorizontal,
+  PackageCheck,
   PackagePlus,
   Pencil,
   Plus,
   Printer,
   RefreshCw,
   Search,
+  ShoppingCart,
   Trash2,
+  Truck,
+  XCircle,
 } from "lucide-react";
-import { api, isSetupRequiredError, type Consumable, type PrinterSetting } from "@/lib/api";
+import {
+  api,
+  isSetupRequiredError,
+  type Consumable,
+  type PrinterSetting,
+  type StockOrder,
+} from "@/lib/api";
 import { copyText, downloadText } from "@/lib/download";
 import { downloadRestockReport } from "@/lib/restock-report";
 import {
@@ -141,21 +152,41 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
   const [labelProfiles, setLabelProfiles] = useState<PrinterSetting[]>([]);
   const [labelProfileId, setLabelProfileId] = useState("");
 
+  /** Open purchase orders (status = ordered). */
+  const [pendingOrders, setPendingOrders] = useState<StockOrder[]>([]);
+  const [orderOpen, setOrderOpen] = useState(false);
+  const [orderItem, setOrderItem] = useState<Consumable | null>(null);
+  const [orderQty, setOrderQty] = useState("");
+  const [orderNote, setOrderNote] = useState("");
+  const [ordering, setOrdering] = useState(false);
+
+  const [deliverOpen, setDeliverOpen] = useState(false);
+  const [deliverOrder, setDeliverOrder] = useState<StockOrder | null>(null);
+  const [deliverQty, setDeliverQty] = useState("");
+  const [deliverNote, setDeliverNote] = useState("");
+  const [delivering, setDelivering] = useState(false);
+  const [orderActionId, setOrderActionId] = useState<number | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
-      if (status !== "all") params.set("status", status);
+      // "ordered" is filtered client-side against pending orders
+      if (status !== "all" && status !== "ordered") params.set("status", status);
       const qs = params.toString();
-      const [data, pr] = await Promise.all([
+      const [data, pr, orders] = await Promise.all([
         api.get<Consumable[]>(`/api/consumables${qs ? `?${qs}` : ""}`),
         api
           .get<PrinterSetting[]>("/api/printers")
           .catch(() => [] as PrinterSetting[]),
+        api
+          .get<StockOrder[]>("/api/stock-orders?status=ordered")
+          .catch(() => [] as StockOrder[]),
       ]);
       setItems(data);
+      setPendingOrders(orders);
       setLabelProfiles(pr);
       setLabelProfileId((prev) => {
         if (prev) return prev;
@@ -166,6 +197,7 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
       const error = err instanceof Error ? err : new Error("Unknown error");
       setLoadError(error);
       setItems([]);
+      setPendingOrders([]);
       if (!isSetupRequiredError(error)) {
         onToast({
           title: "Failed to load consumables",
@@ -187,6 +219,160 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
     const set = new Set(items.map((i) => i.category).filter(Boolean));
     return Array.from(set).sort();
   }, [items]);
+
+  /** Sum of open ordered qty per consumable. */
+  const pendingByItem = useMemo(() => {
+    const map = new Map<number, { total: number; orders: StockOrder[] }>();
+    for (const o of pendingOrders) {
+      const cur = map.get(o.consumable_id) ?? { total: 0, orders: [] };
+      cur.total += Number(o.quantity_ordered) || 0;
+      cur.orders.push(o);
+      map.set(o.consumable_id, cur);
+    }
+    return map;
+  }, [pendingOrders]);
+
+  const visibleItems = useMemo(() => {
+    if (status !== "ordered") return items;
+    return items.filter((i) => pendingByItem.has(i.id));
+  }, [items, status, pendingByItem]);
+
+  const suggestedOrderQty = (item: Consumable) => {
+    // Match restock report: target = min × 2, need = max(0, target − on hand − already ordered)
+    const target = Math.max(0, (Number(item.min_level) || 0) * 2);
+    const already = pendingByItem.get(item.id)?.total ?? 0;
+    return Math.max(1, target - (Number(item.quantity) || 0) - already);
+  };
+
+  const openOrder = (item: Consumable) => {
+    setOrderItem(item);
+    setOrderQty(String(suggestedOrderQty(item)));
+    setOrderNote("");
+    setOrderOpen(true);
+  };
+
+  const submitOrder = async () => {
+    if (!orderItem) return;
+    const qty = Math.trunc(Number(orderQty) || 0);
+    if (qty <= 0) {
+      onToast({ title: "Enter how many you ordered", variant: "destructive" });
+      return;
+    }
+    setOrdering(true);
+    try {
+      const created = await api.post<StockOrder>("/api/stock-orders", {
+        consumable_id: orderItem.id,
+        quantity_ordered: qty,
+        note: orderNote.trim(),
+      });
+      setPendingOrders((prev) => [
+        {
+          ...created,
+          consumable_name: orderItem.name,
+          consumable_sku: orderItem.sku,
+          consumable_unit: orderItem.unit,
+        },
+        ...prev,
+      ]);
+      setOrderOpen(false);
+      onToast({
+        title: "Marked as ordered",
+        description: `${qty} ${orderItem.unit} of ${orderItem.name} — waiting on delivery`,
+        variant: "success",
+      });
+    } catch (err) {
+      onToast({
+        title: "Could not record order",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setOrdering(false);
+    }
+  };
+
+  const openDeliver = (order: StockOrder) => {
+    setDeliverOrder(order);
+    setDeliverQty(String(order.quantity_ordered));
+    setDeliverNote("");
+    setDeliverOpen(true);
+  };
+
+  const submitDeliver = async () => {
+    if (!deliverOrder) return;
+    const qty = Math.trunc(Number(deliverQty) || 0);
+    if (qty <= 0) {
+      onToast({
+        title: "Enter how many were received",
+        variant: "destructive",
+      });
+      return;
+    }
+    setDelivering(true);
+    try {
+      const res = await api.post<{
+        order: StockOrder;
+        consumable: Consumable;
+        quantity_received: number;
+        previous_quantity: number;
+        new_quantity: number;
+        variance: number;
+      }>(`/api/stock-orders/${deliverOrder.id}/deliver`, {
+        quantity_received: qty,
+        note: deliverNote.trim(),
+      });
+      setPendingOrders((prev) =>
+        prev.filter((o) => o.id !== deliverOrder.id),
+      );
+      setItems((prev) =>
+        prev.map((row) =>
+          row.id === res.consumable.id ? res.consumable : row,
+        ),
+      );
+      setDeliverOpen(false);
+      const variance = res.variance ?? 0;
+      onToast({
+        title: "Delivery recorded — stock updated",
+        description:
+          variance === 0
+            ? `+${res.quantity_received} → on hand ${res.new_quantity}`
+            : `+${res.quantity_received} (ordered ${deliverOrder.quantity_ordered}) → on hand ${res.new_quantity}`,
+        variant: "success",
+      });
+    } catch (err) {
+      onToast({
+        title: "Could not mark delivered",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setDelivering(false);
+    }
+  };
+
+  const cancelOrder = async (order: StockOrder) => {
+    if (
+      !window.confirm(
+        `Cancel order of ${order.quantity_ordered} for ${order.consumable_name || "this item"}?`,
+      )
+    ) {
+      return;
+    }
+    setOrderActionId(order.id);
+    try {
+      await api.post(`/api/stock-orders/${order.id}/cancel`, {});
+      setPendingOrders((prev) => prev.filter((o) => o.id !== order.id));
+      onToast({ title: "Order cancelled", variant: "success" });
+    } catch (err) {
+      onToast({
+        title: "Cancel failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setOrderActionId(null);
+    }
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -611,7 +797,7 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
             />
           </div>
           <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="w-full sm:w-40">
+            <SelectTrigger className="w-full sm:w-44">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -619,6 +805,10 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
               <SelectItem value="ok">In stock</SelectItem>
               <SelectItem value="low">Low stock</SelectItem>
               <SelectItem value="out">Out of stock</SelectItem>
+              <SelectItem value="ordered">
+                On order
+                {pendingOrders.length > 0 ? ` (${pendingOrders.length})` : ""}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -646,6 +836,92 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
         <SetupRequiredBanner error={loadError} onRetry={() => void load()} />
       ) : null}
 
+      {/* Pending orders strip */}
+      {!loading && pendingOrders.length > 0 ? (
+        <Card className="border-sky-500/25 bg-sky-500/[0.04]">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-700 dark:text-sky-400">
+                  <Truck className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold leading-tight">
+                    Awaiting delivery
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {pendingOrders.length} open order
+                    {pendingOrders.length === 1 ? "" : "s"} · stock is not
+                    increased until you mark delivered
+                  </p>
+                </div>
+              </div>
+              <Badge
+                variant="outline"
+                className="border-sky-500/30 bg-sky-500/10 text-sky-800 dark:text-sky-300"
+              >
+                <ClipboardList className="mr-1 h-3 w-3" />
+                {pendingOrders.reduce(
+                  (sum, o) => sum + (Number(o.quantity_ordered) || 0),
+                  0,
+                )}{" "}
+                units inbound
+              </Badge>
+            </div>
+            <div className="divide-y divide-border/70 rounded-lg border border-border/70 bg-background/70">
+              {pendingOrders.map((order) => {
+                const item = items.find((i) => i.id === order.consumable_id);
+                const name =
+                  order.consumable_name || item?.name || `Item #${order.consumable_id}`;
+                const unit =
+                  order.consumable_unit || item?.unit || "ea";
+                const sku = order.consumable_sku || item?.sku || "";
+                return (
+                  <div
+                    key={order.id}
+                    className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-mono font-semibold text-foreground">
+                          +{order.quantity_ordered}
+                        </span>{" "}
+                        {unit}
+                        {sku ? ` · ${sku}` : ""}
+                        {order.ordered_by ? ` · ordered by ${order.ordered_by}` : ""}
+                        {order.note ? ` · ${order.note}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        size="sm"
+                        className="h-8"
+                        onClick={() => openDeliver(order)}
+                        disabled={orderActionId === order.id}
+                      >
+                        <PackageCheck className="mr-1.5 h-3.5 w-3.5" />
+                        Mark delivered
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-muted-foreground"
+                        onClick={() => void cancelOrder(order)}
+                        disabled={orderActionId === order.id}
+                        title="Cancel order"
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardContent className="p-0">
           {loading ? (
@@ -654,13 +930,21 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                 <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
               ))}
             </div>
-          ) : items.length === 0 ? (
+          ) : visibleItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 px-4 py-16 text-center">
-              <p className="text-sm font-medium">No consumables match</p>
-              <p className="max-w-sm text-sm text-muted-foreground">
-                Create an item to start decrementing stock and printing asset tags.
+              <p className="text-sm font-medium">
+                {status === "ordered"
+                  ? "No items currently on order"
+                  : "No consumables match"}
               </p>
-              <Button onClick={openCreate}>Add first item</Button>
+              <p className="max-w-sm text-sm text-muted-foreground">
+                {status === "ordered"
+                  ? "Use Mark ordered on an item after you place a supplier order."
+                  : "Create an item to start decrementing stock and printing asset tags."}
+              </p>
+              {status !== "ordered" ? (
+                <Button onClick={openCreate}>Add first item</Button>
+              ) : null}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -670,6 +954,9 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                     <TableHead>Item</TableHead>
                     <TableHead className="hidden md:table-cell">Bin</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="hidden lg:table-cell text-right">
+                      On order
+                    </TableHead>
                     <TableHead className="hidden sm:table-cell text-right">
                       Min
                     </TableHead>
@@ -678,7 +965,9 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {items.map((item) => (
+                  {visibleItems.map((item) => {
+                    const pending = pendingByItem.get(item.id);
+                    return (
                     <TableRow key={item.id}>
                       <TableCell>
                         <div className="min-w-0">
@@ -696,6 +985,14 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                             <Badge variant="outline" className="text-[10px]">
                               {item.category}
                             </Badge>
+                            {pending ? (
+                              <Badge
+                                variant="outline"
+                                className="border-sky-500/30 bg-sky-500/10 text-[10px] text-sky-800 dark:text-sky-300"
+                              >
+                                +{pending.total} on order
+                              </Badge>
+                            ) : null}
                           </div>
                         </div>
                       </TableCell>
@@ -713,14 +1010,33 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                           {item.unit}
                         </span>
                       </TableCell>
+                      <TableCell className="hidden lg:table-cell text-right font-mono text-sm tabular-nums">
+                        {pending ? (
+                          <span className="font-semibold text-sky-700 dark:text-sky-400">
+                            +{pending.total}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell className="hidden sm:table-cell text-right font-mono text-sm tabular-nums text-muted-foreground">
                         {item.min_level}
                       </TableCell>
                       <TableCell>
-                        <StockBadge
-                          quantity={item.quantity}
-                          minLevel={item.min_level}
-                        />
+                        <div className="flex flex-col items-start gap-1">
+                          <StockBadge
+                            quantity={item.quantity}
+                            minLevel={item.min_level}
+                          />
+                          {pending ? (
+                            <Badge
+                              variant="outline"
+                              className="border-sky-500/30 bg-sky-500/10 text-[10px] text-sky-800 dark:text-sky-300"
+                            >
+                              On order
+                            </Badge>
+                          ) : null}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -772,8 +1088,17 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                             size="sm"
                             variant="outline"
                             className="h-8 px-2"
+                            onClick={() => openOrder(item)}
+                            title="Mark ordered"
+                          >
+                            <ShoppingCart className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-2"
                             onClick={() => openRestock(item)}
-                            title="Restock"
+                            title="Restock now (no order)"
                           >
                             <Plus className="h-3.5 w-3.5" />
                           </Button>
@@ -793,6 +1118,23 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openOrder(item)}>
+                                <ShoppingCart className="mr-2 h-3.5 w-3.5" />
+                                Mark ordered…
+                              </DropdownMenuItem>
+                              {pending?.orders[0] ? (
+                                <DropdownMenuItem
+                                  onClick={() => openDeliver(pending.orders[0])}
+                                >
+                                  <PackageCheck className="mr-2 h-3.5 w-3.5" />
+                                  Mark delivered…
+                                </DropdownMenuItem>
+                              ) : null}
+                              <DropdownMenuItem onClick={() => openRestock(item)}>
+                                <Plus className="mr-2 h-3.5 w-3.5" />
+                                Restock now
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => openEdit(item)}>
                                 <Pencil className="mr-2 h-3.5 w-3.5" />
                                 Edit
@@ -814,7 +1156,8 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -1248,6 +1591,194 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                 : Number(printCopies) > 1
                   ? `Print ${Math.max(1, Math.min(99, Number(printCopies) || 1))} labels`
                   : "Print label"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mark ordered */}
+      <Dialog open={orderOpen} onOpenChange={setOrderOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mark as ordered</DialogTitle>
+            <DialogDescription>
+              {orderItem
+                ? `${orderItem.name} · on hand ${orderItem.quantity} ${orderItem.unit}`
+                : "Record a supplier order. Stock stays the same until delivery."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {orderItem ? (
+              <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                <p>
+                  Minimum {orderItem.min_level} {orderItem.unit}
+                  {(pendingByItem.get(orderItem.id)?.total ?? 0) > 0
+                    ? ` · already on order ${pendingByItem.get(orderItem.id)!.total}`
+                    : ""}
+                </p>
+                <p className="mt-0.5">
+                  Suggested order qty (to min × 2):{" "}
+                  <span className="font-mono font-semibold text-foreground">
+                    {suggestedOrderQty(orderItem)}
+                  </span>
+                </p>
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label htmlFor="order-qty">How many did you order?</Label>
+              <Input
+                id="order-qty"
+                type="number"
+                min={1}
+                value={orderQty}
+                onChange={(e) => setOrderQty(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void submitOrder();
+                  }
+                }}
+                autoFocus
+              />
+              {orderItem ? (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[
+                    suggestedOrderQty(orderItem),
+                    Math.max(1, orderItem.min_level),
+                    Math.max(1, orderItem.min_level * 2),
+                    10,
+                    20,
+                    50,
+                  ]
+                    .filter((v, i, a) => a.indexOf(v) === i)
+                    .slice(0, 5)
+                    .map((n) => (
+                      <Button
+                        key={n}
+                        type="button"
+                        size="sm"
+                        variant={String(n) === orderQty ? "default" : "outline"}
+                        className="h-7 px-2.5 text-xs"
+                        onClick={() => setOrderQty(String(n))}
+                      >
+                        {n}
+                      </Button>
+                    ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="order-note">Note (optional)</Label>
+              <Input
+                id="order-note"
+                value={orderNote}
+                onChange={(e) => setOrderNote(e.target.value)}
+                placeholder="PO number, supplier…"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOrderOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitOrder()} disabled={ordering}>
+              <ShoppingCart className="mr-2 h-4 w-4" />
+              {ordering ? "Saving…" : "Mark ordered"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mark delivered */}
+      <Dialog open={deliverOpen} onOpenChange={setDeliverOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mark delivered</DialogTitle>
+            <DialogDescription>
+              {deliverOrder
+                ? `${deliverOrder.consumable_name || "Item"} · ordered ${deliverOrder.quantity_ordered}${
+                    deliverOrder.consumable_unit
+                      ? ` ${deliverOrder.consumable_unit}`
+                      : ""
+                  }`
+                : "Confirm what arrived. On-hand stock will increase by this amount."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-xs text-sky-950 dark:text-sky-100">
+              Was the delivery the correct amount? Enter the quantity actually
+              received — it can differ from the order.
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="deliver-qty">Quantity received</Label>
+              <Input
+                id="deliver-qty"
+                type="number"
+                min={1}
+                value={deliverQty}
+                onChange={(e) => setDeliverQty(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void submitDeliver();
+                  }
+                }}
+                autoFocus
+              />
+              {deliverOrder ? (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={
+                      deliverQty === String(deliverOrder.quantity_ordered)
+                        ? "default"
+                        : "outline"
+                    }
+                    className="h-7 px-2.5 text-xs"
+                    onClick={() =>
+                      setDeliverQty(String(deliverOrder.quantity_ordered))
+                    }
+                  >
+                    Full order ({deliverOrder.quantity_ordered})
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="deliver-note">Note (optional)</Label>
+              <Input
+                id="deliver-note"
+                value={deliverNote}
+                onChange={(e) => setDeliverNote(e.target.value)}
+                placeholder="Short / damaged / packing slip #"
+              />
+            </div>
+            {deliverOrder &&
+            Math.trunc(Number(deliverQty) || 0) > 0 &&
+            Math.trunc(Number(deliverQty) || 0) !==
+              Number(deliverOrder.quantity_ordered) ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                Variance: ordered {deliverOrder.quantity_ordered}, receiving{" "}
+                {Math.trunc(Number(deliverQty) || 0)} (
+                {Math.trunc(Number(deliverQty) || 0) -
+                  Number(deliverOrder.quantity_ordered) >
+                0
+                  ? "+"
+                  : ""}
+                {Math.trunc(Number(deliverQty) || 0) -
+                  Number(deliverOrder.quantity_ordered)}
+                )
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeliverOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitDeliver()} disabled={delivering}>
+              <PackageCheck className="mr-2 h-4 w-4" />
+              {delivering ? "Updating stock…" : "Confirm & add to stock"}
             </Button>
           </DialogFooter>
         </DialogContent>
