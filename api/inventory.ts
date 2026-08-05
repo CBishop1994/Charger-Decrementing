@@ -1982,6 +1982,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (resource === "approved-emails") {
       return await handleApprovedEmails(req, res, auth as Auth, id);
     }
+    if (resource === "stock-orders") {
+      return await handleStockOrders(req, res, auth as Auth, id, action);
+    }
 
     return res.status(404).json({
       error: `Unknown resource: ${resource}`,
