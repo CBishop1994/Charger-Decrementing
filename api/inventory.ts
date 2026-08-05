@@ -1230,6 +1230,12 @@ async function handleScan(
   const dryRun = Boolean(body.dry_run || body.lookup_only);
   const note = String(body.note ?? "scanned").trim() || "scanned";
 
+  // Amount to subtract per scan (default 1). Accept amount / qty / quantity.
+  const rawAmount = Number(body.amount ?? body.qty ?? body.quantity ?? 1);
+  const requestedAmount = Number.isFinite(rawAmount)
+    ? Math.max(1, Math.trunc(Math.abs(rawAmount)))
+    : 1;
+
   let item;
   try {
     item = await findConsumableByScanCode(code);
@@ -1250,6 +1256,7 @@ async function handleScan(
       ok: true,
       dry_run: true,
       consumable: item,
+      amount: requestedAmount,
       low_stock:
         Number(item.quantity) > 0 &&
         Number(item.quantity) <= Number(item.min_level),
@@ -1265,10 +1272,13 @@ async function handleScan(
       code: "OUT_OF_STOCK",
       consumable: item,
       scanned: code,
+      amount: requestedAmount,
     });
   }
 
-  const next = previous - 1;
+  // Cap at on-hand so we never go negative
+  const usedAmount = Math.min(requestedAmount, previous);
+  const next = previous - usedAmount;
   const created_by =
     auth.email || String(body.created_by ?? "scanner").trim() || "scanner";
 
@@ -1284,11 +1294,14 @@ async function handleScan(
     .from("stock_transactions")
     .insert({
       consumable_id: item.id,
-      change_amount: -1,
+      change_amount: -usedAmount,
       previous_quantity: previous,
       new_quantity: next,
       reason: "scan",
-      note,
+      note:
+        usedAmount !== requestedAmount
+          ? `${note} (requested ${requestedAmount}, only ${usedAmount} on hand)`
+          : note,
       created_by,
     })
     .select()
@@ -1299,6 +1312,9 @@ async function handleScan(
     ok: true,
     consumable: updated,
     transaction: tx,
+    amount: usedAmount,
+    requested_amount: requestedAmount,
+    capped: usedAmount !== requestedAmount,
     low_stock: next > 0 && next <= Number(updated.min_level),
     out_of_stock: next <= 0,
     scanned: code,

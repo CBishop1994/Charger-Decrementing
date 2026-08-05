@@ -182,5 +182,9 @@ export type ScanResult = {
   scanned: string;
   previous_quantity?: number;
   new_quantity?: number;
+  /** Actual amount subtracted (may be capped by on-hand stock). */
+  amount?: number;
+  requested_amount?: number;
+  capped?: boolean;
   dry_run?: boolean;
 };
