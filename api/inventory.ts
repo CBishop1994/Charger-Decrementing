@@ -674,9 +674,11 @@ async function handleDashboard(req: VercelRequest, res: VercelResponse) {
   if (binsErr) return sendDbError(res, binsErr);
   if (txsErr) return sendDbError(res, txsErr);
 
-  const list = items ?? [];
+  const list = (items ?? []).filter((i) => i.is_active !== false);
   const low = list.filter((i) => i.quantity > 0 && i.quantity <= i.min_level);
   const out = list.filter((i) => i.quantity <= 0);
+  // Preview list: out of stock first, then low — used by dashboard "Needs attention"
+  const needsAttention = [...out, ...low].slice(0, 12);
 
   const ids = Array.from(
     new Set((txs ?? []).map((t) => t.consumable_id).filter(Boolean)),

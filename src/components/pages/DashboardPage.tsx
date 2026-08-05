@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
+  Download,
   History,
   MapPin,
   Package,
@@ -8,7 +9,13 @@ import {
   RefreshCw,
   Sprout,
 } from "lucide-react";
-import { api, isSetupRequiredError, type DashboardStats } from "@/lib/api";
+import {
+  api,
+  isSetupRequiredError,
+  type Consumable,
+  type DashboardStats,
+} from "@/lib/api";
+import { downloadRestockReport, qtyNeededToRestock } from "@/lib/restock-report";
 import { StatCard } from "@/components/StatCard";
 import { SetupRequiredBanner } from "@/components/SetupRequiredBanner";
 import { Button } from "@/components/ui/button";
@@ -36,6 +43,7 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [seeding, setSeeding] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,6 +70,34 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const downloadReport = async () => {
+    setReportBusy(true);
+    try {
+      const items = await api.get<Consumable[]>("/api/consumables");
+      const result = downloadRestockReport(items);
+      if (result.count === 0) {
+        onToast({
+          title: "Nothing to restock",
+          description: "All items are above their minimum levels.",
+        });
+        return;
+      }
+      onToast({
+        title: "Restock report downloaded",
+        description: `${result.count} item${result.count === 1 ? "" : "s"} · ${result.totalNeeded} units to order (target = min × 2)`,
+        variant: "success",
+      });
+    } catch (err) {
+      onToast({
+        title: "Report failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setReportBusy(false);
+    }
+  };
 
   const seed = async () => {
     setSeeding(true);
@@ -112,6 +148,16 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
             <RefreshCw className={cn("mr-2 h-3.5 w-3.5", loading && "animate-spin")} />
             Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void downloadReport()}
+            disabled={reportBusy || setupRequired || loading}
+            title="Download CSV of items at/below minimum. Qty to restock = (min × 2) − on hand."
+          >
+            <Download className="mr-2 h-3.5 w-3.5" />
+            {reportBusy ? "Preparing…" : "Download restock report"}
           </Button>
           <Button
             variant="secondary"
@@ -225,6 +271,7 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
                     (stats?.low_stock_items ?? []).map((item) => {
                       const qty = Number(item.quantity ?? 0);
                       const min = Number(item.min_level ?? 0);
+                      const need = qtyNeededToRestock(qty, min);
                       const out = qty <= 0;
                       return (
                         <div
@@ -236,7 +283,7 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
                               {String(item.name)}
                             </p>
                             <p className="truncate text-xs text-muted-foreground">
-                              {String(item.sku)} · min {min}
+                              {String(item.sku)} · min {min} · order {need}
                             </p>
                           </div>
                           <Badge
