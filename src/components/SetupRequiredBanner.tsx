@@ -46,10 +46,12 @@ export function SetupRequiredBanner({ error, onRetry }: Props) {
               <code className="rounded bg-muted px-1 py-0.5 text-xs">consumables</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">bin_locations</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">stock_transactions</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">stock_orders</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">printer_settings</code>,{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">approved_emails</code>
-              . Org-linked projects can use <strong>Push to Supabase</strong>; personal
-              projects need the schema applied via the Database SQL editor or setup flow.
+              . Use <strong>Push to Supabase</strong> in the Database panel so new tables
+              like <code className="rounded bg-muted px-1 py-0.5 text-xs">stock_orders</code>{" "}
+              are created — Mark ordered will fail until that table exists.
             </li>
             <li>Reload this app, sign in with Google, then use <strong>Load sample data</strong> on the dashboard.</li>
           </ol>

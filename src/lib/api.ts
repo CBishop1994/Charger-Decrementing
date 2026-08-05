@@ -29,7 +29,9 @@ export function isSetupRequiredError(err: unknown): boolean {
     m.includes("push to supabase") ||
     m.includes("schema cache") ||
     m.includes("tables are not set up") ||
-    m.includes("could not find the table")
+    m.includes("could not find the table") ||
+    m.includes("table is missing") ||
+    (m.includes("stock_orders") && m.includes("missing"))
   );
 }
 

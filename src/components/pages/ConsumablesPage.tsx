@@ -281,11 +281,23 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
         variant: "success",
       });
     } catch (err) {
-      onToast({
-        title: "Could not record order",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
+      const error = err instanceof Error ? err : new Error("Unknown error");
+      if (isSetupRequiredError(error)) {
+        setLoadError(error);
+        onToast({
+          title: "Push stock_orders to Supabase",
+          description:
+            error.message ||
+            "The stock_orders table is missing. Open the Database panel → Push to Supabase, then try again.",
+          variant: "destructive",
+        });
+      } else {
+        onToast({
+          title: "Could not record order",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     } finally {
       setOrdering(false);
     }
@@ -340,11 +352,21 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
         variant: "success",
       });
     } catch (err) {
-      onToast({
-        title: "Could not mark delivered",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
+      const error = err instanceof Error ? err : new Error("Unknown error");
+      if (isSetupRequiredError(error)) {
+        setLoadError(error);
+        onToast({
+          title: "Push stock_orders to Supabase",
+          description: error.message,
+          variant: "destructive",
+        });
+      } else {
+        onToast({
+          title: "Could not mark delivered",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     } finally {
       setDelivering(false);
     }
@@ -364,11 +386,21 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
       setPendingOrders((prev) => prev.filter((o) => o.id !== order.id));
       onToast({ title: "Order cancelled", variant: "success" });
     } catch (err) {
-      onToast({
-        title: "Cancel failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
+      const error = err instanceof Error ? err : new Error("Unknown error");
+      if (isSetupRequiredError(error)) {
+        setLoadError(error);
+        onToast({
+          title: "Push stock_orders to Supabase",
+          description: error.message,
+          variant: "destructive",
+        });
+      } else {
+        onToast({
+          title: "Cancel failed",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     } finally {
       setOrderActionId(null);
     }

@@ -18,6 +18,17 @@ export function isMissingTableError(message) {
 export const SETUP_REQUIRED_MESSAGE =
   "Database tables are not set up yet. Open the Database panel and click “Push to Supabase”, then reload this app.";
 
+/** Extract a public.table_name (if present) from a PostgREST schema-cache error. */
+function missingTableName(message) {
+  if (!message) return null;
+  const m = String(message);
+  const match =
+    m.match(/public\.([a-zA-Z0-9_]+)/i) ||
+    m.match(/table ['`]?([a-zA-Z0-9_]+)['`]?/i) ||
+    m.match(/relation ['`]?([a-zA-Z0-9_\.]+)['`]?/i);
+  return match ? match[1].replace(/^public\./i, "") : null;
+}
+
 /**
  * Map a Supabase error (or thrown Error) to { status, body } for the response.
  */
@@ -30,12 +41,18 @@ export function mapDbError(error) {
         : "Server error";
 
   if (isMissingTableError(message)) {
+    const table = missingTableName(message);
+    const errorMsg = table
+      ? `The “${table}” table is missing from Supabase. Open the Database panel, click “Push to Supabase”, wait for it to finish, then reload this app.`
+      : SETUP_REQUIRED_MESSAGE;
     return {
       status: 503,
       body: {
-        error: SETUP_REQUIRED_MESSAGE,
+        error: errorMsg,
         code: "SETUP_REQUIRED",
         detail: message,
+        table: table || undefined,
+        hint: "Schema is defined in src/db/schema.ts but has not been applied to the linked Supabase project yet.",
       },
     };
   }
