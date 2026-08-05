@@ -73,6 +73,24 @@ function inventoryApiRewrites(): Plugin {
       pattern: /^\/api\/approved-emails\/?$/,
       build: () => "/api/inventory?resource=approved-emails",
     },
+    {
+      pattern: /^\/api\/stock-orders\/(\d+)\/deliver\/?$/,
+      build: (m) =>
+        `/api/inventory?resource=stock-orders&id=${m[1]}&action=deliver`,
+    },
+    {
+      pattern: /^\/api\/stock-orders\/(\d+)\/cancel\/?$/,
+      build: (m) =>
+        `/api/inventory?resource=stock-orders&id=${m[1]}&action=cancel`,
+    },
+    {
+      pattern: /^\/api\/stock-orders\/(\d+)\/?$/,
+      build: (m) => `/api/inventory?resource=stock-orders&id=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/stock-orders\/?$/,
+      build: () => "/api/inventory?resource=stock-orders",
+    },
   ];
 
   return {
