@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ChevronDown,
   Download,
   Minus,
   MoreHorizontal,
@@ -108,8 +109,12 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
   const [adjustDelta, setAdjustDelta] = useState("1");
   const [adjustNote, setAdjustNote] = useState("");
   const [adjusting, setAdjusting] = useState(false);
-  /** Row id currently running a one-click use (−1). */
+  /** Row id currently running a use decrement. */
   const [usingId, setUsingId] = useState<number | null>(null);
+  const [useCustomOpen, setUseCustomOpen] = useState(false);
+  const [useCustomItem, setUseCustomItem] = useState<Consumable | null>(null);
+  const [useCustomQty, setUseCustomQty] = useState("1");
+  const [useCustomNote, setUseCustomNote] = useState("");
 
   const [printOpen, setPrintOpen] = useState(false);
   const [printItem, setPrintItem] = useState<Consumable | null>(null);
@@ -234,8 +239,12 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
     }
   };
 
-  /** One-click use: always subtract exactly 1 — no quantity prompt. */
-  const quickUse = async (item: Consumable) => {
+  /** Subtract a fixed amount (1 / 10 / 20 / custom). Caps at on-hand qty. */
+  const quickUse = async (
+    item: Consumable,
+    amount: number,
+    note = "",
+  ) => {
     if (item.quantity <= 0) {
       onToast({
         title: "Already out of stock",
@@ -244,13 +253,20 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
       });
       return;
     }
+    const qty = Math.abs(Math.trunc(amount));
+    if (!qty) {
+      onToast({ title: "Enter a quantity", variant: "destructive" });
+      return;
+    }
     if (usingId != null) return;
+
+    const used = Math.min(qty, item.quantity);
     setUsingId(item.id);
-    // Optimistic UI: drop qty by 1 immediately, then reconcile with server.
+    // Optimistic UI: drop qty immediately, then reconcile with server.
     setItems((prev) =>
       prev.map((row) =>
         row.id === item.id
-          ? { ...row, quantity: Math.max(0, row.quantity - 1) }
+          ? { ...row, quantity: Math.max(0, row.quantity - used) }
           : row,
       ),
     );
@@ -260,15 +276,15 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
         low_stock: boolean;
         out_of_stock: boolean;
       }>(`/api/consumables/${item.id}/adjust`, {
-        delta: -1,
+        delta: -used,
         reason: "use",
-        note: "",
+        note: note.trim(),
       });
       setItems((prev) =>
         prev.map((row) => (row.id === item.id ? res.consumable : row)),
       );
       onToast({
-        title: `Used 1 ${item.unit}`,
+        title: `Used ${used} ${item.unit}`,
         description: res.out_of_stock
           ? `${item.name} is now out of stock`
           : res.low_stock
@@ -289,6 +305,24 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
     } finally {
       setUsingId(null);
     }
+  };
+
+  const openUseCustom = (item: Consumable) => {
+    setUseCustomItem(item);
+    setUseCustomQty("1");
+    setUseCustomNote("");
+    setUseCustomOpen(true);
+  };
+
+  const submitUseCustom = async () => {
+    if (!useCustomItem) return;
+    const amount = Math.abs(Math.trunc(Number(useCustomQty) || 0));
+    if (!amount) {
+      onToast({ title: "Enter a quantity", variant: "destructive" });
+      return;
+    }
+    setUseCustomOpen(false);
+    await quickUse(useCustomItem, amount, useCustomNote);
   };
 
   const openRestock = (item: Consumable) => {
@@ -585,16 +619,50 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 px-2"
-                            onClick={() => void quickUse(item)}
-                            disabled={item.quantity <= 0 || usingId === item.id}
-                            title="Use 1"
-                          >
-                            <Minus className="h-3.5 w-3.5" />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 gap-1 px-2"
+                                disabled={
+                                  item.quantity <= 0 || usingId === item.id
+                                }
+                                title="Use stock"
+                              >
+                                <Minus className="h-3.5 w-3.5" />
+                                <span className="hidden text-xs sm:inline">
+                                  Use
+                                </span>
+                                <ChevronDown className="h-3 w-3 opacity-70" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem
+                                onClick={() => void quickUse(item, 1)}
+                              >
+                                Use 1
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={item.quantity < 10}
+                                onClick={() => void quickUse(item, 10)}
+                              >
+                                Use 10
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={item.quantity < 20}
+                                onClick={() => void quickUse(item, 20)}
+                              >
+                                Use 20
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => openUseCustom(item)}
+                              >
+                                Use custom amount…
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                           <Button
                             size="sm"
                             variant="outline"
@@ -773,7 +841,73 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
         </DialogContent>
       </Dialog>
 
-      {/* Restock (quantity prompt). Use is one-click −1 via the minus button. */}
+      {/* Custom use amount */}
+      <Dialog open={useCustomOpen} onOpenChange={setUseCustomOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Use custom amount</DialogTitle>
+            <DialogDescription>
+              {useCustomItem
+                ? `${useCustomItem.name} · on hand ${useCustomItem.quantity} ${useCustomItem.unit}`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="use-qty">Quantity to use</Label>
+              <Input
+                id="use-qty"
+                type="number"
+                min={1}
+                max={useCustomItem?.quantity ?? undefined}
+                value={useCustomQty}
+                onChange={(e) => setUseCustomQty(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void submitUseCustom();
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="use-note">Note (optional)</Label>
+              <Input
+                id="use-note"
+                value={useCustomNote}
+                onChange={(e) => setUseCustomNote(e.target.value)}
+                placeholder="Job #, line, reason…"
+              />
+            </div>
+            {useCustomItem ? (
+              <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                New quantity will be{" "}
+                <span className="font-semibold tabular-nums text-foreground">
+                  {Math.max(
+                    0,
+                    useCustomItem.quantity -
+                      Math.abs(Math.trunc(Number(useCustomQty) || 0)),
+                  )}
+                </span>
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUseCustomOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void submitUseCustom()}
+              disabled={usingId != null || !useCustomItem}
+            >
+              {usingId != null ? "Saving…" : "Use stock"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Restock (quantity prompt). */}
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
