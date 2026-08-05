@@ -16,6 +16,15 @@ import {
   finalizeZpl,
   labelPreviewLines,
 } from "@/lib/zpl";
+import {
+  BrowserPrintError,
+  discoverZebraPrinters,
+  pickDefaultPrinter,
+  sendZplToBrowserPrint,
+  withCopies,
+  type ZebraBrowserPrinter,
+} from "@/lib/zebra-browser-print";
+import { cn } from "@/lib/utils";
 import { LabelPreview } from "@/components/LabelPreview";
 import { SetupRequiredBanner } from "@/components/SetupRequiredBanner";
 import { Button } from "@/components/ui/button";
@@ -54,7 +63,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
 
 type ToastFn = (t: {
   title: string;
@@ -84,7 +92,6 @@ const emptyForm = (): FormState => ({
 
 export function BinsPage({ onToast }: { onToast: ToastFn }) {
   const [bins, setBins] = useState<BinLocation[]>([]);
-  const [printers, setPrinters] = useState<PrinterSetting[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [search, setSearch] = useState("");
@@ -96,8 +103,16 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
   const [printOpen, setPrintOpen] = useState(false);
   const [printBin, setPrintBin] = useState<BinLocation | null>(null);
   const [printCopies, setPrintCopies] = useState("1");
-  const [printPrinterId, setPrintPrinterId] = useState("");
   const [printing, setPrinting] = useState(false);
+  const [bpPrinters, setBpPrinters] = useState<ZebraBrowserPrinter[]>([]);
+  const [bpSelectedUid, setBpSelectedUid] = useState("");
+  const [bpStatus, setBpStatus] = useState<
+    "idle" | "checking" | "online" | "offline"
+  >("idle");
+  const [bpError, setBpError] = useState<string | null>(null);
+  const [bpRefreshing, setBpRefreshing] = useState(false);
+  const [labelProfiles, setLabelProfiles] = useState<PrinterSetting[]>([]);
+  const [labelProfileId, setLabelProfileId] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,14 +123,17 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
       const qs = params.toString();
       const [data, pr] = await Promise.all([
         api.get<BinLocation[]>(`/api/bin-locations${qs ? `?${qs}` : ""}`),
-        api.get<PrinterSetting[]>("/api/printers").catch(() => [] as PrinterSetting[]),
+        api
+          .get<PrinterSetting[]>("/api/printers")
+          .catch(() => [] as PrinterSetting[]),
       ]);
       setBins(data);
-      setPrinters(pr);
-      if (!printPrinterId) {
+      setLabelProfiles(pr);
+      setLabelProfileId((prev) => {
+        if (prev) return prev;
         const def = pr.find((p) => p.is_default) ?? pr[0];
-        if (def) setPrintPrinterId(String(def.id));
-      }
+        return def ? String(def.id) : "";
+      });
     } catch (err) {
       const error = err instanceof Error ? err : new Error("Unknown error");
       setLoadError(error);
@@ -130,7 +148,7 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
     } finally {
       setLoading(false);
     }
-  }, [onToast, search, printPrinterId]);
+  }, [onToast, search]);
 
   useEffect(() => {
     const t = window.setTimeout(() => void load(), 200);
@@ -204,34 +222,64 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
     }
   };
 
+  const refreshBrowserPrinters = useCallback(async () => {
+    setBpRefreshing(true);
+    setBpStatus("checking");
+    setBpError(null);
+    try {
+      const list = await discoverZebraPrinters();
+      setBpPrinters(list);
+      setBpStatus("online");
+      setBpSelectedUid((prev) => {
+        if (prev && list.some((p) => p.uid === prev)) return prev;
+        const pick = pickDefaultPrinter(list);
+        return pick?.uid ?? "";
+      });
+      if (list.length === 0) {
+        setBpError(
+          "Browser Print is running, but no Zebra printers were found.",
+        );
+      }
+    } catch (err) {
+      setBpPrinters([]);
+      setBpSelectedUid("");
+      setBpStatus("offline");
+      setBpError(
+        err instanceof BrowserPrintError
+          ? err.message
+          : "Could not reach Zebra Browser Print on this computer.",
+      );
+    } finally {
+      setBpRefreshing(false);
+    }
+  }, []);
+
   const openPrint = (bin: BinLocation) => {
     setPrintBin(bin);
     setPrintCopies("1");
     setPrintOpen(true);
+    void refreshBrowserPrinters();
+  };
+
+  const buildSingleBinZpl = (): string => {
+    if (!printBin) throw new Error("No bin selected");
+    const profile =
+      labelProfiles.find((p) => String(p.id) === labelProfileId) ??
+      labelProfiles.find((p) => p.is_default) ??
+      labelProfiles[0];
+    return finalizeZpl(
+      buildBinLocationLabelZpl(printBin, {
+        widthMm: profile?.label_width_mm ?? 101.6,
+        heightMm: profile?.label_height_mm ?? 50.8,
+        dpi: profile?.dpi ?? 203,
+      }),
+    );
   };
 
   const resolveBinZpl = async (): Promise<string> => {
     if (!printBin) throw new Error("No bin selected");
-    const copies = Math.max(1, Number(printCopies) || 1);
-    try {
-      const res = await api.post<{ zpl: string }>("/api/print", {
-        type: "bin",
-        id: printBin.id,
-        copies,
-        dry_run: true,
-        printer_id: printPrinterId ? Number(printPrinterId) : undefined,
-      });
-      return finalizeZpl(res.zpl);
-    } catch {
-      const printer = printers.find((p) => String(p.id) === printPrinterId);
-      const zpl = buildBinLocationLabelZpl(printBin, {
-        widthMm: printer?.label_width_mm ?? 101.6,
-        heightMm: printer?.label_height_mm ?? 50.8,
-        dpi: printer?.dpi ?? 203,
-      });
-      const one = finalizeZpl(zpl).replace(/\r\n$/, "");
-      return finalizeZpl(Array.from({ length: copies }, () => one).join("\n"));
-    }
+    const copies = Math.max(1, Math.min(99, Number(printCopies) || 1));
+    return withCopies(buildSingleBinZpl(), copies);
   };
 
   const downloadZpl = async () => {
@@ -245,8 +293,7 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
       );
       onToast({
         title: "Label file downloaded",
-        description:
-          "Raw ZPL for Zebra Setup Utilities — not a ZebraDesigner project.",
+        description: "Raw ZPL backup for Zebra Setup Utilities.",
         variant: "success",
       });
     } catch (err) {
@@ -265,7 +312,6 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
       await copyText(zpl);
       onToast({
         title: "ZPL copied",
-        description: "Paste into Zebra Setup Utilities or a raw print tool.",
         variant: "success",
       });
     } catch (err) {
@@ -279,35 +325,54 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
 
   const sendPrint = async () => {
     if (!printBin) return;
+    const copies = Math.max(1, Math.min(99, Number(printCopies) || 1));
     setPrinting(true);
     try {
-      const res = await api.post<{
-        printer?: { name: string; host: string; port: number };
-      }>("/api/print", {
-        type: "bin",
-        id: printBin.id,
-        copies: Number(printCopies) || 1,
-        printer_id: printPrinterId ? Number(printPrinterId) : undefined,
-      });
+      let list = bpPrinters;
+      if (list.length === 0) {
+        list = await discoverZebraPrinters();
+        setBpPrinters(list);
+        setBpStatus("online");
+      }
+      if (list.length === 0) {
+        throw new BrowserPrintError(
+          "No Zebra printers found. Open Browser Print and connect your printer.",
+          "NO_PRINTERS",
+        );
+      }
+      const printer =
+        list.find((p) => p.uid === bpSelectedUid) ?? pickDefaultPrinter(list);
+      if (!printer) {
+        throw new BrowserPrintError("Select a printer first.", "NO_PRINTERS");
+      }
+      if (printer.uid !== bpSelectedUid) setBpSelectedUid(printer.uid);
+
+      const zpl = withCopies(buildSingleBinZpl(), copies);
+      await sendZplToBrowserPrint(printer, zpl);
+
       onToast({
-        title: "Sent to printer",
-        description: res.printer
-          ? `${res.printer.name} @ ${res.printer.host}:${res.printer.port}`
-          : undefined,
+        title:
+          copies === 1
+            ? "Label sent to printer"
+            : `${copies} labels sent to printer`,
+        description: `${printer.name} · ${printBin.asset_tag || printBin.code}`,
         variant: "success",
       });
       setPrintOpen(false);
     } catch (err) {
-      const hint =
-        err && typeof err === "object" && "hint" in err
-          ? String((err as { hint?: string }).hint ?? "")
-          : "";
+      const message =
+        err instanceof BrowserPrintError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Print failed";
+      setBpError(message);
+      if (err instanceof BrowserPrintError && err.code === "OFFLINE") {
+        setBpStatus("offline");
+      }
       onToast({
-        title: "Print failed (network unreachable from cloud)",
-        description:
-          hint ||
-          (err instanceof Error ? err.message : "Unknown error") +
-            " — use Download ZPL from a PC on the printer network.",
+        title: "Print failed",
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -550,27 +615,58 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
           <DialogHeader>
             <DialogTitle>Print bin location tag</DialogTitle>
             <DialogDescription>
-              Download saves raw ZPL for Zebra Setup Utilities — not a
-              ZebraDesigner project file.
+              Sends labels through <strong>Zebra Browser Print</strong> on this
+              computer. Set copies for a batch.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label>Printer</Label>
-                <Select value={printPrinterId} onValueChange={setPrintPrinterId}>
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Zebra printer</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => void refreshBrowserPrinters()}
+                    disabled={bpRefreshing}
+                  >
+                    <RefreshCw
+                      className={cn(
+                        "mr-1 h-3 w-3",
+                        bpRefreshing && "animate-spin",
+                      )}
+                    />
+                    Refresh
+                  </Button>
+                </div>
+                <Select
+                  value={bpSelectedUid || undefined}
+                  onValueChange={setBpSelectedUid}
+                  disabled={bpPrinters.length === 0}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select printer" />
+                    <SelectValue
+                      placeholder={
+                        bpStatus === "checking"
+                          ? "Looking for printers…"
+                          : bpStatus === "offline"
+                            ? "Browser Print offline"
+                            : "Select printer"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    {printers.length === 0 ? (
+                    {bpPrinters.length === 0 ? (
                       <SelectItem value="none" disabled>
-                        No printers configured
+                        No printers found
                       </SelectItem>
                     ) : (
-                      printers.map((p) => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.name} — {p.host}:{p.port}
+                      bpPrinters.map((p) => (
+                        <SelectItem key={p.uid} value={p.uid}>
+                          {p.name}
+                          {p.connection ? ` · ${p.connection}` : ""}
                         </SelectItem>
                       ))
                     )}
@@ -578,38 +674,93 @@ export function BinsPage({ onToast }: { onToast: ToastFn }) {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="b-copies">Copies</Label>
+                <Label htmlFor="b-copies">Copies (batch)</Label>
                 <Input
                   id="b-copies"
                   type="number"
                   min={1}
-                  max={20}
+                  max={99}
                   value={printCopies}
                   onChange={(e) => setPrintCopies(e.target.value)}
                 />
+                <div className="flex flex-wrap gap-1.5">
+                  {[1, 5, 10, 20, 50].map((n) => (
+                    <Button
+                      key={n}
+                      type="button"
+                      size="sm"
+                      variant={
+                        String(n) === String(Number(printCopies) || 0)
+                          ? "default"
+                          : "outline"
+                      }
+                      className="h-7 px-2.5 text-xs"
+                      onClick={() => setPrintCopies(String(n))}
+                    >
+                      {n}
+                    </Button>
+                  ))}
+                </div>
               </div>
+              {labelProfiles.length > 0 ? (
+                <div className="space-y-1.5">
+                  <Label>Label size profile</Label>
+                  <Select
+                    value={labelProfileId || undefined}
+                    onValueChange={setLabelProfileId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Default 4×2 in" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {labelProfiles.map((p) => (
+                        <SelectItem key={p.id} value={String(p.id)}>
+                          {p.name} · {p.label_width_mm}×{p.label_height_mm} mm
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
             </div>
             <LabelPreview lines={previewLines} footer={printBin?.asset_tag} />
           </div>
-          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            Use <strong>Zebra Setup Utilities</strong> → Open Printer Tools →
-            Action → Send file. ZebraDesigner will not open this file as a
-            project.
-          </div>
+          {bpError ? (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+              <p className="font-medium">Browser Print</p>
+              <p className="mt-0.5">{bpError}</p>
+              <p className="mt-1.5">
+                Install Zebra Browser Print on this PC, keep it running, then
+                click Refresh.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              Prints from this PC via Browser Print. Download is a backup.
+            </div>
+          )}
           <DialogFooter className="flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button variant="outline" onClick={() => void copyZpl()}>
               Copy ZPL
             </Button>
             <Button variant="outline" onClick={() => void downloadZpl()}>
               <Download className="mr-2 h-4 w-4" />
-              Download label file
+              Download
             </Button>
             <Button
               onClick={() => void sendPrint()}
-              disabled={printing || printers.length === 0}
+              disabled={
+                printing ||
+                bpStatus === "checking" ||
+                (bpStatus === "offline" && bpPrinters.length === 0)
+              }
             >
               <Printer className="mr-2 h-4 w-4" />
-              {printing ? "Sending…" : "Print to network"}
+              {printing
+                ? "Sending…"
+                : Number(printCopies) > 1
+                  ? `Print ${Math.max(1, Math.min(99, Number(printCopies) || 1))} labels`
+                  : "Print label"}
             </Button>
           </DialogFooter>
         </DialogContent>
