@@ -22,6 +22,9 @@ export const DEFAULT_JIRA_SECTION_HEADING = "## **{{title}} ({{count}})**";
 const LEGACY_JIRA_SECTION_HEADING = "## {{title}} ({{count}})";
 
 export const DEFAULT_JIRA_ITEM_LINE =
+  "- {{name}}{{mpn_part}}: {{qty}} {{unit}} on hand (min {{min}}){{on_order_part}}{{order_part}}{{bin_part}}";
+
+const LEGACY_JIRA_ITEM_LINE =
   "- {{name}}{{sku_part}}: {{qty}} {{unit}} on hand (min {{min}}){{on_order_part}}{{order_part}}{{bin_part}}";
 
 export const DEFAULT_JIRA_EMPTY_SECTION = "(none)";
@@ -253,7 +256,11 @@ export function serializeAlertSettings(row) {
         LEGACY_JIRA_SECTION_HEADING,
       ),
     jira_item_line_template:
-      String(row?.jira_item_line_template ?? "").trim() || DEFAULT_JIRA_ITEM_LINE,
+      normalizeJiraTemplate(
+        row?.jira_item_line_template,
+        DEFAULT_JIRA_ITEM_LINE,
+        LEGACY_JIRA_ITEM_LINE,
+      ),
     jira_empty_section_template:
       String(row?.jira_empty_section_template ?? "").trim() ||
       DEFAULT_JIRA_EMPTY_SECTION,

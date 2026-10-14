@@ -178,6 +178,7 @@ export function buildConsumablesReport(items, opts = {}) {
       name: String(item?.name ?? "Item"),
       sku: String(item?.sku ?? ""),
       mpn: String(item?.mpn ?? ""),
+      mpn: String(item?.mpn ?? ""),
       quantity: qty,
       min_level: min,
       quantity_on_order: onOrder,
@@ -256,6 +257,7 @@ function includedSectionKeys(settings) {
 function formatItemLine(item, itemLineTpl) {
   const name = String(item.name ?? "Item");
   const sku = String(item.sku ?? "").trim();
+  const mpn = String(item.mpn ?? "").trim();
   const qty = Number(item.quantity) || 0;
   const min = Number(item.min_level) || 0;
   const unit = String(item.unit ?? "ea").trim() || "ea";
@@ -272,6 +274,7 @@ function formatItemLine(item, itemLineTpl) {
   return applyTemplate(itemLineTpl, {
     name,
     sku,
+    mpn,
     qty,
     min,
     unit,
@@ -282,6 +285,7 @@ function formatItemLine(item, itemLineTpl) {
     on_order_part: onOrder > 0 ? ` · **${onOrder} ${unit} on order**` : "",
     restock_target: target,
     sku_part: sku ? ` [${sku}]` : "",
+    mpn_part: mpn ? ` [${mpn}]` : "",
     order_part: order > 0 ? ` · **order ${order} ${unit}**` : "",
     bin_part: bin ? ` · bin ${bin}` : "",
   }).trimEnd();
@@ -483,7 +487,7 @@ export async function runConsumablesWeeklyAlerts(opts = {}) {
   const { data: items, error: itemsErr } = await supabaseAdmin
     .from("consumables")
     .select(
-      "id,name,sku,quantity,min_level,unit,category,bin_location,is_active",
+      "id,name,sku,mpn,quantity,min_level,unit,category,bin_location,is_active",
     )
     .eq("is_active", true)
     .order("name", { ascending: true });

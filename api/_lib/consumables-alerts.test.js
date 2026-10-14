@@ -204,6 +204,51 @@ describe("consumables stock classification", () => {
     assert.match(ticket.description, /TOTAL 10/);
   });
 
+  it("uses MPN in default Jira lines and preserves custom SKU placeholders", () => {
+    const report = buildConsumablesReport([
+      {
+        name: "Anker - 8-in-1 USB-C Hub",
+        sku: "ANK8IN1USBCH",
+        mpn: "A83830A1",
+        quantity: 0,
+        min_level: 5,
+      },
+    ]);
+
+    const defaultTicket = renderConsumablesAlertTicket({
+      weekKey: "2026-W41",
+      report,
+    });
+    assert.match(
+      defaultTicket.description,
+      /Anker - 8-in-1 USB-C Hub \[A83830A1\]/,
+    );
+    assert.equal(defaultTicket.description.includes("[ANK8IN1USBCH]"), false);
+
+    const customTicket = renderConsumablesAlertTicket({
+      weekKey: "2026-W41",
+      report,
+      settings: {
+        include_out_of_stock: true,
+        include_below_minimum: false,
+        include_approaching: false,
+        include_good: false,
+        jira_item_line_template: "- {{name}}{{sku_part}} · MPN{{mpn_part}}",
+      },
+    });
+    assert.match(
+      customTicket.description,
+      /Anker - 8-in-1 USB-C Hub \[ANK8IN1USBCH\] · MPN \[A83830A1\]/,
+    );
+
+    const migrated = serializeAlertSettings({
+      jira_item_line_template:
+        "- {{name}}{{sku_part}}: {{qty}} {{unit}} on hand (min {{min}}){{on_order_part}}{{order_part}}{{bin_part}}",
+    });
+    assert.match(migrated.jira_item_line_template, /{{mpn_part}}/);
+    assert.doesNotMatch(migrated.jira_item_line_template, /{{sku_part}}/);
+  });
+
   it("omits disabled report sections from the ticket", () => {
     const report = buildConsumablesReport([
       { name: "Out", quantity: 0, min_level: 5 },
