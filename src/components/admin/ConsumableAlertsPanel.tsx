@@ -36,6 +36,7 @@ import {
   type AlertTemplatePieceId,
 } from "@/lib/alert-template-pieces";
 import { downloadRestockReport } from "@/lib/restock-report";
+import { downloadCurrentStockReport } from "@/lib/current-stock-report";
 import { SetupRequiredBanner } from "@/components/SetupRequiredBanner";
 import { SkuStockBarChart } from "@/components/admin/SkuStockBarChart";
 import { StockStatusDonutChart } from "@/components/admin/StockStatusDonutChart";
@@ -140,6 +141,7 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
+  const [currentStockBusy, setCurrentStockBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sheetWidth, setSheetWidth] = useState(SETTINGS_SHEET_DEFAULT_W);
   const resizeDragRef = useRef<{ startX: number; startW: number } | null>(
@@ -381,6 +383,40 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
     }
   };
 
+  const downloadCurrentStockCsv = async () => {
+    setCurrentStockBusy(true);
+    try {
+      const inventory = await api.get<Consumable[]>(
+        "/api/consumables?status=active",
+      );
+      const alertRows = new Map(
+        (status?.items ?? []).map((item) => [item.id, item]),
+      );
+      const reportItems = inventory.map((item) => {
+        const alertItem = alertRows.get(item.id);
+        return {
+          ...item,
+          quantity_on_order: alertItem?.quantity_on_order ?? null,
+          stock_status: alertItem?.status ?? null,
+        };
+      });
+      const result = downloadCurrentStockReport(reportItems);
+      onToast({
+        title: "Current stock report downloaded",
+        description: `${result.count} active item${result.count === 1 ? "" : "s"} included`,
+        variant: "success",
+      });
+    } catch (err) {
+      onToast({
+        title: "Current stock report failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setCurrentStockBusy(false);
+    }
+  };
+
   const setupRequired = isSetupRequiredError(error);
   const counts = status?.counts;
   const unitsToOrder = counts?.units_to_order ?? 0;
@@ -492,10 +528,19 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
               variant="outline"
               size="sm"
               onClick={() => void downloadRestockCsv()}
-              disabled={reportBusy || setupRequired || loading}
+              disabled={reportBusy || currentStockBusy || setupRequired || loading}
             >
               <Download className="mr-1.5 h-3.5 w-3.5" />
               {reportBusy ? "Preparing…" : "Restock CSV"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void downloadCurrentStockCsv()}
+              disabled={currentStockBusy || reportBusy || setupRequired || loading}
+            >
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              {currentStockBusy ? "Preparing…" : "Current Stock CSV"}
             </Button>
             <Button
               size="sm"
