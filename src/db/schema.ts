@@ -4,6 +4,7 @@ export const consumables = pgTable("consumables", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   sku: text("sku").notNull(),
+  mpn: text("mpn"),
   description: text("description").notNull(),
   quantity: integer("quantity").notNull(),
   min_level: integer("min_level").notNull(),

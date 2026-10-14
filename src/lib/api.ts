@@ -102,6 +102,7 @@ export type Consumable = {
   id: number;
   name: string;
   sku: string;
+  mpn: string | null;
   description: string;
   quantity: number;
   min_level: number;
@@ -454,6 +455,7 @@ export type ConsumablesAlertSkuRow = {
   id: number;
   name: string;
   sku: string;
+  mpn: string;
   quantity: number;
   min_level: number;
   unit: string;

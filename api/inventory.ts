@@ -264,6 +264,8 @@ async function handleConsumables(
         if (!sku) return res.status(400).json({ error: "SKU cannot be empty" });
         updates.sku = sku;
       }
+      if (body.mpn !== undefined)
+        updates.mpn = String(body.mpn).trim();
       if (body.description !== undefined)
         updates.description = String(body.description).trim();
       if (body.quantity !== undefined)
@@ -315,7 +317,7 @@ async function handleConsumables(
     if (category) query = query.eq("category", category);
     if (search) {
       query = query.or(
-        `name.ilike.%${search}%,sku.ilike.%${search}%,asset_tag.ilike.%${search}%,bin_location.ilike.%${search}%`,
+        `name.ilike.%${search}%,sku.ilike.%${search}%,mpn.ilike.%${search}%,asset_tag.ilike.%${search}%,bin_location.ilike.%${search}%`,
       );
     }
 
@@ -350,6 +352,7 @@ async function handleConsumables(
     const payload = {
       name,
       sku,
+      mpn: String(body.mpn ?? "").trim(),
       description: String(body.description ?? "").trim(),
       quantity,
       min_level,

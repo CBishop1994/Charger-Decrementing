@@ -4,6 +4,7 @@ import { downloadText } from "@/lib/download";
 export type RestockReportItem = {
   name: string;
   sku?: string | null;
+  mpn?: string | null;
   asset_tag?: string | null;
   bin_location?: string | null;
   category?: string | null;
@@ -91,6 +92,7 @@ export function buildRestockReportCsv(items: RestockReportItem[]): {
   const headers = [
     "Name",
     "SKU",
+    "MPN",
     "Asset Tag",
     "Bin",
     "Category",
@@ -108,6 +110,7 @@ export function buildRestockReportCsv(items: RestockReportItem[]): {
       [
         r.name,
         r.sku ?? "",
+        r.mpn ?? "",
         r.asset_tag ?? "",
         r.bin_location ?? "",
         r.category ?? "",

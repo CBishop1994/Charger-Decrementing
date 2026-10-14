@@ -4,6 +4,7 @@ import { downloadText } from "@/lib/download";
 export type CurrentStockReportItem = {
   name: string;
   sku?: string | null;
+  mpn?: string | null;
   asset_tag?: string | null;
   bin_location?: string | null;
   category?: string | null;
@@ -85,6 +86,7 @@ export function buildCurrentStockReportCsv(items: CurrentStockReportItem[]): {
   const headers = [
     "Name",
     "SKU",
+    "MPN",
     "Asset Tag",
     "Category",
     "Bin",
@@ -101,6 +103,7 @@ export function buildCurrentStockReportCsv(items: CurrentStockReportItem[]): {
       [
         item.name,
         item.sku ?? "",
+        item.mpn ?? "",
         item.asset_tag ?? "",
         item.category ?? "",
         item.bin_location ?? "",

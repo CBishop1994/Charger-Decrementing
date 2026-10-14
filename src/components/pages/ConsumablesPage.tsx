@@ -88,6 +88,7 @@ type ToastFn = (t: {
 type FormState = {
   name: string;
   sku: string;
+  mpn: string;
   description: string;
   quantity: string;
   min_level: string;
@@ -101,6 +102,7 @@ type FormState = {
 const emptyForm = (): FormState => ({
   name: "",
   sku: "",
+  mpn: "",
   description: "",
   quantity: "0",
   min_level: "0",
@@ -415,6 +417,7 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
     setForm({
       name: item.name,
       sku: item.sku,
+      mpn: item.mpn || "",
       description: item.description || "",
       quantity: String(item.quantity),
       min_level: String(item.min_level),
@@ -433,6 +436,7 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
       const payload = {
         name: form.name.trim(),
         sku: form.sku.trim(),
+        mpn: form.mpn.trim(),
         description: form.description.trim(),
         quantity: Number(form.quantity) || 0,
         min_level: Number(form.min_level) || 0,
@@ -970,6 +974,7 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                           <p className="font-medium leading-tight">{item.name}</p>
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {item.sku}
+                            {item.mpn ? ` · MPN ${item.mpn}` : ""}
                             {item.asset_tag ? ` · ${item.asset_tag}` : ""}
                           </p>
                           <div className="mt-1 flex flex-wrap gap-1 md:hidden">
@@ -1193,6 +1198,15 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
                 value={form.sku}
                 onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
                 placeholder="BOLT-M8-25"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="c-mpn">MPN (Manufacturer Part Number)</Label>
+              <Input
+                id="c-mpn"
+                value={form.mpn}
+                onChange={(e) => setForm((f) => ({ ...f, mpn: e.target.value }))}
+                placeholder="Manufacturer part number"
               />
             </div>
             <div className="space-y-1.5">

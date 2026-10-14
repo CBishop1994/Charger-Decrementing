@@ -169,7 +169,7 @@ async function handleStatus(req, res, auth) {
     const { data: items, error: itemsErr } = await supabaseAdmin
       .from("consumables")
       .select(
-        "id,name,sku,quantity,min_level,unit,category,bin_location,is_active",
+        "id,name,sku,mpn,quantity,min_level,unit,category,bin_location,is_active",
       )
       .eq("is_active", true);
     if (itemsErr) return sendDbError(res, itemsErr);

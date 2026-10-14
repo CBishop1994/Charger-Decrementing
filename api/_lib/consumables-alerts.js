@@ -177,6 +177,7 @@ export function buildConsumablesReport(items, opts = {}) {
       id: Number(item?.id) || 0,
       name: String(item?.name ?? "Item"),
       sku: String(item?.sku ?? ""),
+      mpn: String(item?.mpn ?? ""),
       quantity: qty,
       min_level: min,
       quantity_on_order: onOrder,
