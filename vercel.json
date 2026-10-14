@@ -92,6 +92,10 @@
       "destination": "/api/inventory?resource=consumables-alerts&action=run"
     },
     {
+      "source": "/api/consumables-alerts/settings",
+      "destination": "/api/inventory?resource=consumables-alerts&action=settings"
+    },
+    {
       "source": "/api/consumables-alerts/status",
       "destination": "/api/inventory?resource=consumables-alerts&action=status"
     },
