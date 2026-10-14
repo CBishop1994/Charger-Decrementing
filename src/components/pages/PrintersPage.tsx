@@ -77,7 +77,14 @@ const emptyForm = (): FormState => ({
   notes: "",
 });
 
-export function PrintersPage({ onToast }: { onToast: ToastFn }) {
+export function PrintersPage({
+  onToast,
+  embedded = false,
+}: {
+  onToast: ToastFn;
+  /** When true, hide page chrome meant for the standalone nav view. */
+  embedded?: boolean;
+}) {
   const [printers, setPrinters] = useState<PrinterSetting[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<Error | null>(null);
@@ -198,14 +205,19 @@ export function PrintersPage({ onToast }: { onToast: ToastFn }) {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className={cn(embedded ? "space-y-4" : "mx-auto max-w-6xl space-y-6")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="max-w-xl space-y-1">
+        {!embedded ? (
+          <div className="max-w-xl space-y-1">
+            <p className="text-sm text-muted-foreground">
+              Configure Zebra-compatible Ethernet printers (RAW port 9100).
+            </p>
+          </div>
+        ) : (
           <p className="text-sm text-muted-foreground">
-            Configure Zebra-compatible Ethernet printers (RAW port 9100). The
-            server sends ZPL over TCP when you print asset or bin tags.
+            Ethernet label printers (RAW 9100)
           </p>
-        </div>
+        )}
         <div className="flex gap-2">
           <Button variant="outline" size="icon" onClick={() => void load()}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
@@ -221,39 +233,35 @@ export function PrintersPage({ onToast }: { onToast: ToastFn }) {
         <SetupRequiredBanner error={loadError} onRetry={() => void load()} />
       ) : null}
 
-      <BlurFade>
-        <Card className="border-primary/15 bg-primary/[0.03]">
-          <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Printer className="h-5 w-5" />
-            </div>
-            <div className="space-y-1 text-sm">
-              <p className="font-medium text-foreground">Network requirements</p>
-              <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
-                <li>
-                  <strong>Saving a printer</strong> only stores IP/port in the
-                  database — it does not test the connection.
-                </li>
-                <li>
-                  <strong>Live Print</strong> opens a TCP socket from the{" "}
-                  <em>server</em> to the printer. Vercel cannot reach private
-                  IPs like <code className="rounded bg-muted px-1">192.168.96.21</code>
-                  . Use <strong>Download ZPL</strong>, or run the app on-prem /
-                  VPN on the printer LAN.
-                </li>
-                <li>
-                  Enable RAW TCP printing (usually port <strong>9100</strong>)
-                  on the printer.
-                </li>
-                <li>
-                  Labels are ZPL with <strong>QR codes</strong> for asset and
-                  bin tags.
-                </li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
-      </BlurFade>
+      {!embedded ? (
+        <BlurFade>
+          <Card className="border-primary/15 bg-primary/[0.03]">
+            <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Printer className="h-5 w-5" />
+              </div>
+              <div className="space-y-1 text-sm">
+                <p className="font-medium text-foreground">Network requirements</p>
+                <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
+                  <li>
+                    <strong>Saving a printer</strong> only stores IP/port in the
+                    database — it does not test the connection.
+                  </li>
+                  <li>
+                    <strong>Live Print</strong> opens a TCP socket from the{" "}
+                    <em>server</em> to the printer. Vercel cannot reach private
+                    IPs. Use <strong>Download ZPL</strong>, or run on the
+                    printer LAN.
+                  </li>
+                  <li>
+                    Enable RAW TCP printing (usually port <strong>9100</strong>).
+                  </li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+        </BlurFade>
+      ) : null}
 
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2">

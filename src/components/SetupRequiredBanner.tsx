@@ -53,7 +53,7 @@ export function SetupRequiredBanner({ error, onRetry }: Props) {
               like <code className="rounded bg-muted px-1 py-0.5 text-xs">stock_orders</code>{" "}
               are created — Mark ordered will fail until that table exists.
             </li>
-            <li>Reload this app, sign in with Google, then use <strong>Load sample data</strong> on the dashboard.</li>
+            <li>Reload this app, sign in with Google, then use <strong>Load sample data</strong> on Admin (local DEV).</li>
           </ol>
           {onRetry ? (
             <div className="pt-1">

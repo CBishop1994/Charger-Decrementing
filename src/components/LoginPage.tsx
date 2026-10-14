@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Boxes, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth/use-auth";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { DotPattern } from "@/components/ui/dot-pattern";
@@ -31,9 +33,55 @@ function GoogleGlyph({ className }: { className?: string }) {
 }
 
 export function LoginPage() {
-  const { signIn, status } = useAuth();
+  const { signIn, signInDev, status } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [devLogin, setDevLogin] = useState<{
+    enabled: boolean;
+    email: string;
+  } | null>(null);
+  const [devEmail, setDevEmail] = useState("dev@localhost");
+  const [devPassword, setDevPassword] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const resp = await fetch("/api/auth/dev-login", {
+          credentials: "include",
+        });
+        if (!resp.ok) return;
+        const json = (await resp.json()) as {
+          enabled?: boolean;
+          email?: string;
+        };
+        if (cancelled || !json.enabled) return;
+        const email = json.email || "dev@localhost";
+        setDevLogin({ enabled: true, email });
+        setDevEmail(email);
+      } catch {
+        // Production and misconfigured hosts 404 this endpoint.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleDevLogin(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await signInDev(devEmail, devPassword);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Development sign-in failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleGoogle() {
     setError(null);
@@ -116,19 +164,74 @@ export function LoginPage() {
               </div>
             ) : null}
 
+            {devLogin?.enabled ? (
+              <form className="space-y-3" onSubmit={(e) => void handleDevLogin(e)}>
+                <div className="space-y-1.5">
+                  <Label htmlFor="dev-email">Development account</Label>
+                  <Input
+                    id="dev-email"
+                    autoComplete="username"
+                    value={devEmail}
+                    onChange={(e) => setDevEmail(e.target.value)}
+                    disabled={busy || status === "loading"}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="dev-password">Password</Label>
+                  <Input
+                    id="dev-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={devPassword}
+                    onChange={(e) => setDevPassword(e.target.value)}
+                    disabled={busy || status === "loading"}
+                    placeholder="dev-local-only"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="h-11 w-full"
+                  disabled={busy || status === "loading"}
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Sign in as local dev
+                </Button>
+                <p className="text-center text-[11px] text-muted-foreground">
+                  Local dev normally auto-signs in as{" "}
+                  <code className="rounded bg-muted px-1 py-0.5">{devLogin.email}</code>
+                  . Use this form after Sign out, or with password{" "}
+                  <code className="rounded bg-muted px-1 py-0.5">dev-local-only</code>
+                  . Not available in production.
+                </p>
+              </form>
+            ) : null}
+
+            {devLogin?.enabled ? (
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-[11px] uppercase tracking-wide">
+                  <span className="bg-card px-2 text-muted-foreground">or</span>
+                </div>
+              </div>
+            ) : null}
+
             <Button
               type="button"
               size="lg"
+              variant={devLogin?.enabled ? "outline" : "default"}
               className="h-11 w-full gap-2"
               disabled={busy || status === "loading"}
               onClick={handleGoogle}
             >
-              {busy ? (
+              {busy && !devLogin?.enabled ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <GoogleGlyph className="h-4 w-4" />
               )}
-              {busy ? "Opening Google…" : "Continue with Google"}
+              {busy && !devLogin?.enabled ? "Opening Google…" : "Continue with Google"}
             </Button>
 
             <p className="text-center text-[11px] text-muted-foreground">

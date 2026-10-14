@@ -5,6 +5,11 @@
 
 import { loadSession } from "../auth/_lib/session.js";
 import { supabaseAdmin } from "./supabase-admin.js";
+import {
+  isDevAuthEnabled,
+  isDevLoginSession,
+  syntheticDevApprovedRow,
+} from "./dev-auth.js";
 
 /**
  * Normalize emails for allowlist comparison.
@@ -113,6 +118,27 @@ export async function requireApprovedUser(req, res, opts = {}) {
       return null;
     }
 
+    if (isDevAuthEnabled() && isDevLoginSession(session)) {
+      const row = syntheticDevApprovedRow();
+      if (opts.requireAdmin && !row.is_admin) {
+        res.status(403).json({
+          error: "Admin access required",
+          code: "FORBIDDEN",
+        });
+        return null;
+      }
+      return {
+        session,
+        approved: row,
+        email: normalizeEmail(session.email),
+        name: session.name ?? row.name ?? "",
+        isAdmin: true,
+        provider: session.provider,
+        sub: session.sub,
+        picture: session.picture ?? null,
+      };
+    }
+
     const row = await getApprovedEmail(session.email);
     if (!row) {
       res.status(403).json({
@@ -137,6 +163,9 @@ export async function requireApprovedUser(req, res, opts = {}) {
       email: normalizeEmail(session.email),
       name: session.name ?? row.name ?? "",
       isAdmin: Boolean(row.is_admin),
+      provider: session.provider,
+      sub: session.sub,
+      picture: session.picture ?? null,
     };
   } catch (err) {
     const message =

@@ -3,7 +3,6 @@ import {
   ChevronDown,
   ClipboardList,
   Download,
-  FileSpreadsheet,
   Minus,
   MoreHorizontal,
   PackageCheck,
@@ -26,7 +25,6 @@ import {
   type StockOrder,
 } from "@/lib/api";
 import { copyText, downloadText } from "@/lib/download";
-import { downloadRestockReport } from "@/lib/restock-report";
 import {
   buildConsumableLabelZpl,
   finalizeZpl,
@@ -565,31 +563,6 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
     await quickUse(useCustomItem, amount, useCustomNote);
   };
 
-  const downloadReport = () => {
-    try {
-      const result = downloadRestockReport(items);
-      if (result.count === 0) {
-        onToast({
-          title: "Nothing to restock",
-          description:
-            "No items in the current list are at or below minimum. Clear filters or check other statuses.",
-        });
-        return;
-      }
-      onToast({
-        title: "Restock report downloaded",
-        description: `${result.count} item${result.count === 1 ? "" : "s"} · ${result.totalNeeded} units to order (target = min × 2)`,
-        variant: "success",
-      });
-    } catch (err) {
-      onToast({
-        title: "Report failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
-    }
-  };
-
   const openRestock = (item: Consumable) => {
     setAdjustItem(item);
     setAdjustDelta("1");
@@ -845,15 +818,6 @@ export function ConsumablesPage({ onToast }: { onToast: ToastFn }) {
           </Select>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={downloadReport}
-            disabled={loading || isSetupRequiredError(loadError)}
-            title="CSV of items at/below minimum. Qty to restock = (min × 2) − on hand."
-          >
-            <FileSpreadsheet className="mr-2 h-4 w-4" />
-            Restock report
-          </Button>
           <Button variant="outline" size="icon" onClick={() => void load()}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>

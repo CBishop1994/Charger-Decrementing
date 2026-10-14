@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { HandlerRequest, HandlerResponse } from "@appdirect/auth-bff/handlers";
 import { loadEnv, type Plugin, type ViteDevServer } from "vite";
 
 const API_ROOT = resolve(process.cwd(), "api");
@@ -37,20 +38,18 @@ function hydrateProcessEnvFromDotEnv(mode: string): void {
   }
 }
 
-type VercelLikeRequest = IncomingMessage & {
-  query: Record<string, string | string[] | undefined>;
+type ApiRouteRequest = IncomingMessage & HandlerRequest & {
   body: unknown;
   cookies: Record<string, string>;
 };
 
-type VercelLikeResponse = ServerResponse & {
-  status: (code: number) => VercelLikeResponse;
-  json: (body: unknown) => void;
+type ApiRouteResponse = ServerResponse & HandlerResponse & {
   send: (body: unknown) => void;
+  redirect: (statusOrUrl: number | string, url?: string) => void;
 };
 
 async function readRequestBody(req: IncomingMessage): Promise<unknown> {
-  // Vercel's runtime auto-parses JSON bodies; mirror that here so
+  // Serverless runtimes auto-parse JSON bodies; mirror that here so
   // handlers can read `req.body` directly. Non-JSON bodies are
   // returned as raw strings.
   const chunks: Buffer[] = [];
@@ -210,17 +209,17 @@ export function appbuilderApiDevServer(): Plugin {
           const query = parseQuery(url, resolved.params);
           const cookies = parseCookies(req.headers.cookie);
 
-          const vercelReq = Object.assign(req, { body, query, cookies }) as VercelLikeRequest;
-          const vercelRes = res as VercelLikeResponse;
-          vercelRes.status = function (code: number) {
+          const handlerReq = Object.assign(req, { body, query, cookies }) as ApiRouteRequest;
+          const handlerRes = res as ApiRouteResponse;
+          handlerRes.status = function (code: number) {
             this.statusCode = code;
             return this;
           };
-          vercelRes.json = function (payload: unknown) {
+          handlerRes.json = function (payload: unknown) {
             if (!this.hasHeader("Content-Type")) this.setHeader("Content-Type", "application/json");
             this.end(JSON.stringify(payload));
           };
-          vercelRes.send = function (payload: unknown) {
+          handlerRes.send = function (payload: unknown) {
             if (typeof payload === "string") {
               this.end(payload);
             } else if (payload === undefined || payload === null) {
@@ -230,8 +229,17 @@ export function appbuilderApiDevServer(): Plugin {
               this.end(JSON.stringify(payload));
             }
           };
+          // Mirror @vercel/node: res.redirect(url) => 307, res.redirect(status, url).
+          // Auth handlers (login/logout) end with a redirect and crash without it.
+          handlerRes.redirect = function (statusOrUrl: number | string, url?: string) {
+            const status = typeof statusOrUrl === "number" ? statusOrUrl : 307;
+            const location = typeof statusOrUrl === "string" ? statusOrUrl : (url ?? "/");
+            this.statusCode = status;
+            this.setHeader("Location", location);
+            this.end();
+          };
 
-          await (handler as (req: VercelLikeRequest, res: VercelLikeResponse) => unknown)(vercelReq, vercelRes);
+          await (handler as (req: ApiRouteRequest, res: ApiRouteResponse) => unknown)(handlerReq, handlerRes);
         } catch (err) {
           if (!res.headersSent) {
             res.statusCode = 500;

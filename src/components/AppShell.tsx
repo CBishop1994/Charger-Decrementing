@@ -1,12 +1,12 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   Boxes,
+  ClipboardList,
   LayoutDashboard,
   LogOut,
   MapPin,
   Moon,
   Package,
-  Printer,
   ScanLine,
   Shield,
   Sun,
@@ -17,21 +17,25 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/theme";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { useAuth } from "@/lib/auth/use-auth";
+import { useIsAdmin } from "@/lib/auth/use-is-admin";
 
 export type AppView =
   | "dashboard"
   | "scan"
   | "consumables"
+  | "procurement"
   | "bins"
-  | "printers"
   | "history"
-  | "access";
+  | "admin"
+  /** @deprecated moved under Admin — kept for session migration */
+  | "printers";
 
 const NAV: Array<{
   id: AppView;
   label: string;
   icon: typeof LayoutDashboard;
   description: string;
+  adminOnly?: boolean;
 }> = [
   {
     id: "dashboard",
@@ -52,16 +56,16 @@ const NAV: Array<{
     description: "Decrement & restock",
   },
   {
+    id: "procurement",
+    label: "Procurement",
+    icon: ClipboardList,
+    description: "Daily warehouse orders",
+  },
+  {
     id: "bins",
     label: "Bin locations",
     icon: MapPin,
     description: "Location asset tags",
-  },
-  {
-    id: "printers",
-    label: "Printers",
-    icon: Printer,
-    description: "Ethernet label printers",
   },
   {
     id: "history",
@@ -70,10 +74,11 @@ const NAV: Array<{
     description: "Stock movement log",
   },
   {
-    id: "access",
-    label: "Access",
+    id: "admin",
+    label: "Admin",
     icon: Shield,
-    description: "Approved Google emails",
+    description: "Access & admin tools",
+    adminOnly: true,
   },
 ];
 
@@ -88,7 +93,9 @@ export function AppShell({
 }) {
   const { theme, toggle } = useTheme();
   const { user, signOut } = useAuth();
-  const active = NAV.find((n) => n.id === view) ?? NAV[0];
+  const { isAdmin, loading: adminLoading } = useIsAdmin();
+  const navItems = NAV.filter((item) => !item.adminOnly || isAdmin);
+  const active = navItems.find((n) => n.id === view) ?? navItems[0] ?? NAV[0];
   const displayName = user?.name || user?.email || "Signed in";
   const initials = (user?.name || user?.email || "?")
     .split(/\s+|@/)
@@ -96,6 +103,12 @@ export function AppShell({
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join("");
+
+  useEffect(() => {
+    if (!adminLoading && view === "admin" && !isAdmin) {
+      onNavigate("dashboard");
+    }
+  }, [view, isAdmin, adminLoading, onNavigate]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -117,7 +130,7 @@ export function AppShell({
           </div>
 
           <nav className="flex flex-1 flex-col gap-1 p-3">
-            {NAV.map((item) => {
+            {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = item.id === view;
               return (
@@ -254,7 +267,7 @@ export function AppShell({
 
             {/* Mobile nav */}
             <div className="flex gap-1 overflow-x-auto border-t border-border px-2 py-2 md:hidden">
-              {NAV.map((item) => {
+              {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = item.id === view;
                 return (

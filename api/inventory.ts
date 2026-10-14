@@ -5,16 +5,31 @@
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import net from "node:net";
-import { supabaseAdmin } from "./_lib/supabase-admin.js";
+import {
+  hasSupabaseCredentials,
+  resolveDataBackendMode,
+  supabaseAdmin,
+} from "./_lib/supabase-admin.js";
 import { isMissingTableError, sendDbError } from "./_lib/errors.js";
 import {
   normalizeEmail,
   requireApprovedUser,
 } from "./_lib/require-auth.js";
 import {
+  isDevAuthEnabled,
+  isDevLoginSession,
+  syntheticDevApprovedRow,
+} from "./_lib/dev-auth.js";
+import {
   buildBinLocationLabelZpl,
   buildConsumableLabelZpl,
 } from "./_lib/zpl.js";
+import {
+  handleProcurement,
+  seedProcurementDemo,
+} from "./_lib/procurement-handlers.js";
+import { handleConsumablesAlerts } from "./_lib/consumables-alerts-handlers.js";
+import { handleIntegrations } from "./_lib/integration-test-handlers.js";
 
 type Auth = {
   email: string;
@@ -63,27 +78,33 @@ function handleHealth(req: VercelRequest, res: VercelResponse) {
   const hasUrl = Boolean(url.trim());
   const hasServiceRoleKey = Boolean(serviceKey.trim());
   const hasAnonKey = Boolean(anonKey.trim());
-  const hasSessionSecret = sessionSecret.trim().length >= 16;
+  const hasSessionSecret =
+    sessionSecret.trim().length >= 16 || isDevAuthEnabled();
   const hasGoogleId = Boolean(googleId.trim());
   const hasGoogleSecret = Boolean(googleSecret.trim());
+  const googleRequired = !isDevAuthEnabled();
+  const dataBackend = resolveDataBackendMode();
+  const localMemoryOk =
+    isDevAuthEnabled() && !hasSupabaseCredentials() && dataBackend === "local-memory";
 
   const ok =
-    hasUrl &&
-    hasServiceRoleKey &&
+    ((hasUrl && hasServiceRoleKey) || localMemoryOk) &&
     hasSessionSecret &&
-    hasGoogleId &&
-    hasGoogleSecret;
+    (!googleRequired || (hasGoogleId && hasGoogleSecret));
 
   const missing: string[] = [];
-  if (!hasUrl) missing.push("SUPABASE_URL");
-  if (!hasServiceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (!localMemoryOk) {
+    if (!hasUrl) missing.push("SUPABASE_URL");
+    if (!hasServiceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  }
   if (!hasSessionSecret) missing.push("SESSION_SECRET");
-  if (!hasGoogleId) missing.push("GOOGLE_CLIENT_ID");
-  if (!hasGoogleSecret) missing.push("GOOGLE_CLIENT_SECRET");
+  if (googleRequired && !hasGoogleId) missing.push("GOOGLE_CLIENT_ID");
+  if (googleRequired && !hasGoogleSecret) missing.push("GOOGLE_CLIENT_SECRET");
 
   return res.status(ok ? 200 : 503).json({
     ok,
     runtime: "vercel-serverless",
+    dataBackend: dataBackend ?? "unconfigured",
     env: {
       SUPABASE_URL: {
         present: hasUrl,
@@ -115,15 +136,24 @@ function handleHealth(req: VercelRequest, res: VercelResponse) {
     },
     missing,
     hint: ok
-      ? "Required env vars look present. If sign-in still fails, check Google redirect URI and approved_emails table."
+      ? localMemoryOk
+        ? "Local destage mode: in-memory inventory (no Supabase). Dev login + /api/seed work offline. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to use a real project."
+        : isDevAuthEnabled()
+          ? "Dev login is enabled. Sign in with the local development account, or Google if those env vars are set."
+          : "Required env vars look present. If sign-in still fails, check Google redirect URI and approved_emails table."
       : `Missing or invalid env vars: ${missing.join(", ")}. Add them under Vercel → Settings → Environment Variables (Production + Preview), then Redeploy.`,
-    requiredNames: [
-      "SUPABASE_URL",
-      "SUPABASE_SERVICE_ROLE_KEY",
-      "SESSION_SECRET",
-      "GOOGLE_CLIENT_ID",
-      "GOOGLE_CLIENT_SECRET",
-    ],
+    requiredNames: googleRequired
+      ? [
+          "SUPABASE_URL",
+          "SUPABASE_SERVICE_ROLE_KEY",
+          "SESSION_SECRET",
+          "GOOGLE_CLIENT_ID",
+          "GOOGLE_CLIENT_SECRET",
+        ]
+      : localMemoryOk
+        ? []
+        : ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"],
+    devLogin: isDevAuthEnabled(),
   });
 }
 
@@ -1214,13 +1244,14 @@ const SAMPLE_ITEMS = [
     name: "Machine Oil ISO 68",
     sku: "LUB-ISO68-1L",
     description: "1L bottle hydraulic / machine oil",
-    quantity: 14,
+    // Approaching: qty > min but <= min × 1.25 (4 × 1.25 = 5)
+    quantity: 5,
     min_level: 4,
     unit: "btl",
     category: "Lubricants",
     bin_location: "C-03-01",
     asset_tag: "AST-ISO68-DEMO5",
-    notes: "",
+    notes: "Approaching minimum — demo seed",
   },
   {
     name: "Cable Ties 200mm",
@@ -1237,6 +1268,11 @@ const SAMPLE_ITEMS = [
 ];
 
 async function handleSeed(req: VercelRequest, res: VercelResponse) {
+  // Same gate as local/dev login — never seed (or wipe) production data.
+  if (!isDevAuthEnabled()) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
@@ -1250,18 +1286,35 @@ async function handleSeed(req: VercelRequest, res: VercelResponse) {
   if (countErr) return sendDbError(res, countErr);
 
   if ((itemCount ?? 0) > 0 && !force) {
+    let procurementSeed: { skipped?: boolean; lines?: number } = {};
+    try {
+      procurementSeed = await seedProcurementDemo(false);
+    } catch {
+      // Procurement tables may not exist yet on older Supabase projects.
+      procurementSeed = { skipped: true, lines: 0 };
+    }
     return res.status(200).json({
       ok: true,
       skipped: true,
       message: "Database already has consumables. Pass force=true to re-seed.",
+      procurement_lines: procurementSeed.lines ?? 0,
+      procurement_skipped: Boolean(procurementSeed.skipped),
     });
   }
 
   if (force) {
+    await supabaseAdmin.from("stock_orders").delete().neq("id", 0);
     await supabaseAdmin.from("stock_transactions").delete().neq("id", 0);
     await supabaseAdmin.from("consumables").delete().neq("id", 0);
     await supabaseAdmin.from("bin_locations").delete().neq("id", 0);
     await supabaseAdmin.from("printer_settings").delete().neq("id", 0);
+    await supabaseAdmin.from("procurement_order_lines").delete().neq("id", 0);
+    await supabaseAdmin.from("procurement_batches").delete().neq("id", 0);
+    try {
+      await supabaseAdmin.from("consumables_alert_batches").delete().neq("id", 0);
+    } catch {
+      // Table may not exist until drizzle/0004–0005 consumables alert SQL is applied.
+    }
   }
 
   const { data: bins, error: binsErr } = await supabaseAdmin
@@ -1299,6 +1352,10 @@ async function handleSeed(req: VercelRequest, res: VercelResponse) {
     .select();
   if (printErr) return sendDbError(res, printErr);
 
+  const bySku = new Map(
+    (items ?? []).map((i: { id: number; sku: string }) => [i.sku, i]),
+  );
+
   if (items && items.length >= 2) {
     await supabaseAdmin.from("stock_transactions").insert([
       {
@@ -1322,11 +1379,72 @@ async function handleSeed(req: VercelRequest, res: VercelResponse) {
     ]);
   }
 
+  // Pending replenishment orders so dashboard / consumables order UI is populated.
+  const demoOrders: Array<{
+    sku: string;
+    quantity_ordered: number;
+    note: string;
+  }> = [
+    {
+      sku: "NUT-M8-NYL",
+      quantity_ordered: 100,
+      note: "Restock — below min after kit builds",
+    },
+    {
+      sku: "PPE-GLS-CLR",
+      quantity_ordered: 24,
+      note: "Out of stock; safety walk-through",
+    },
+    {
+      sku: "TIE-200-BLK",
+      quantity_ordered: 10,
+      note: "Electrical bay restock",
+    },
+  ];
+
+  const orderRows = demoOrders
+    .map((o) => {
+      const item = bySku.get(o.sku);
+      if (!item) return null;
+      return {
+        consumable_id: item.id,
+        quantity_ordered: o.quantity_ordered,
+        quantity_received: null,
+        status: "ordered",
+        note: o.note,
+        ordered_by: "demo",
+        received_by: "",
+        ordered_at: new Date().toISOString(),
+        delivered_at: null,
+      };
+    })
+    .filter(Boolean);
+
+  let ordersInserted = 0;
+  if (orderRows.length > 0) {
+    const { data: orders, error: orderErr } = await supabaseAdmin
+      .from("stock_orders")
+      .insert(orderRows)
+      .select("id");
+    if (orderErr) return sendDbError(res, orderErr);
+    ordersInserted = orders?.length ?? 0;
+  }
+
+  let procurementSeed: { skipped?: boolean; lines?: number } = {};
+  try {
+    procurementSeed = await seedProcurementDemo(force);
+  } catch (err) {
+    return sendDbError(res, err);
+  }
+
   return res.status(201).json({
     ok: true,
     bins: bins?.length ?? 0,
     consumables: items?.length ?? 0,
     printers: printers?.length ?? 0,
+    stock_orders: ordersInserted,
+    procurement_lines: procurementSeed.lines ?? 0,
+    procurement_skipped: Boolean(procurementSeed.skipped),
   });
 }
 
@@ -1748,6 +1866,11 @@ async function handleApprovedEmails(
   id: number | null,
 ) {
   if (id != null) {
+    if (id === 0) {
+      return res.status(400).json({
+        error: "The local development account cannot be changed this way",
+      });
+    }
     if (req.method === "PATCH") {
       const a = auth;
       if (!a) return;
@@ -1813,6 +1936,12 @@ async function handleApprovedEmails(
       if (loadErr) return sendDbError(res, loadErr);
       if (!target) return res.status(404).json({ error: "Not found" });
 
+      if (id === 0 || target.id === 0) {
+        return res.status(400).json({
+          error: "The local development account cannot be removed",
+        });
+      }
+
       if (target.email === a.email) {
         return res
           .status(400)
@@ -1850,7 +1979,16 @@ async function handleApprovedEmails(
       .select("*")
       .order("created_at", { ascending: true });
     if (error) return sendDbError(res, error);
-    return res.status(200).json(data ?? []);
+    const rows = data ?? [];
+    if (isDevAuthEnabled() && isDevLoginSession(auth)) {
+      const synthetic = syntheticDevApprovedRow();
+      const already = rows.some(
+        (r: { email?: string }) =>
+          String(r.email ?? "").toLowerCase() === synthetic.email,
+      );
+      if (!already) return res.status(200).json([synthetic, ...rows]);
+    }
+    return res.status(200).json(rows);
   }
 
   if (req.method === "POST") {
@@ -1984,6 +2122,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (resource === "stock-orders") {
       return await handleStockOrders(req, res, auth as Auth, id, action);
+    }
+    if (resource === "procurement") {
+      return await handleProcurement(req, res, auth as Auth, id, action);
+    }
+    if (resource === "consumables-alerts") {
+      return await handleConsumablesAlerts(req, res, auth as Auth, action);
+    }
+    if (resource === "integrations") {
+      return await handleIntegrations(req, res, auth as Auth, action);
     }
 
     return res.status(404).json({

@@ -1,23 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
-  Download,
   History,
   MapPin,
   Package,
   PackageX,
   RefreshCw,
-  Sprout,
   Truck,
 } from "lucide-react";
 import {
   api,
   isSetupRequiredError,
-  type Consumable,
   type DashboardStats,
   type StockOrder,
 } from "@/lib/api";
-import { downloadRestockReport, qtyNeededToRestock } from "@/lib/restock-report";
+import { qtyNeededToRestock } from "@/lib/restock-report";
 import { StatCard } from "@/components/StatCard";
 import { SetupRequiredBanner } from "@/components/SetupRequiredBanner";
 import { Button } from "@/components/ui/button";
@@ -46,8 +43,6 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
   const [stats, setStats] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<Error | null>(null);
-  const [seeding, setSeeding] = useState(false);
-  const [reportBusy, setReportBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,68 +70,6 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
     void load();
   }, [load]);
 
-  const downloadReport = async () => {
-    setReportBusy(true);
-    try {
-      const items = await api.get<Consumable[]>("/api/consumables");
-      const result = downloadRestockReport(items);
-      if (result.count === 0) {
-        onToast({
-          title: "Nothing to restock",
-          description: "All items are above their minimum levels.",
-        });
-        return;
-      }
-      onToast({
-        title: "Restock report downloaded",
-        description: `${result.count} item${result.count === 1 ? "" : "s"} · ${result.totalNeeded} units to order (target = min × 2)`,
-        variant: "success",
-      });
-    } catch (err) {
-      onToast({
-        title: "Report failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setReportBusy(false);
-    }
-  };
-
-  const seed = async () => {
-    setSeeding(true);
-    try {
-      const res = await api.post<{
-        ok: boolean;
-        skipped?: boolean;
-        message?: string;
-        consumables?: number;
-        bins?: number;
-      }>("/api/seed", {});
-      if (res.skipped) {
-        onToast({
-          title: "Already seeded",
-          description: res.message,
-        });
-      } else {
-        onToast({
-          title: "Sample data loaded",
-          description: `${res.consumables ?? 0} items, ${res.bins ?? 0} bins`,
-          variant: "success",
-        });
-      }
-      await load();
-    } catch (err) {
-      onToast({
-        title: "Seed failed",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setSeeding(false);
-    }
-  };
-
   const setupRequired = isSetupRequiredError(loadError);
   const empty = !loading && !setupRequired && (stats?.total_items ?? 0) === 0;
 
@@ -152,25 +85,6 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
             <RefreshCw className={cn("mr-2 h-3.5 w-3.5", loading && "animate-spin")} />
             Refresh
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void downloadReport()}
-            disabled={reportBusy || setupRequired || loading}
-            title="Download CSV of items at/below minimum. Qty to restock = (min × 2) − on hand."
-          >
-            <Download className="mr-2 h-3.5 w-3.5" />
-            {reportBusy ? "Preparing…" : "Download restock report"}
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void seed()}
-            disabled={seeding || setupRequired}
-          >
-            <Sprout className="mr-2 h-3.5 w-3.5" />
-            {seeding ? "Seeding…" : "Load sample data"}
           </Button>
         </div>
       </div>
@@ -191,15 +105,12 @@ export function DashboardPage({ onToast, onGoConsumables, onGoBins }: Props) {
                   No consumables yet
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Add your first items, or load sample shop-floor data to explore
-                  decrementing stock and printing asset tags.
+                  Add your first items to start tracking stock. On local DEV,
+                  admins can load sample data from Admin → Local.
                 </p>
               </div>
               <div className="flex flex-wrap justify-center gap-2">
                 <Button onClick={onGoConsumables}>Add consumables</Button>
-                <Button variant="outline" onClick={() => void seed()} disabled={seeding}>
-                  Load sample data
-                </Button>
               </div>
             </CardContent>
           </Card>

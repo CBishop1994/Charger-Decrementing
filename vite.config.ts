@@ -91,6 +91,39 @@ function inventoryApiRewrites(): Plugin {
       pattern: /^\/api\/stock-orders\/?$/,
       build: () => "/api/inventory?resource=stock-orders",
     },
+    {
+      pattern: /^\/api\/procurement\/(\d+)\/?$/,
+      build: (m) => `/api/inventory?resource=procurement&id=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/procurement\/(close|settings|status)\/?$/,
+      build: (m) =>
+        `/api/inventory?resource=procurement&action=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/procurement\/?$/,
+      build: () => "/api/inventory?resource=procurement",
+    },
+    {
+      pattern: /^\/api\/consumables-alerts\/(run|status)\/?$/,
+      build: (m) =>
+        `/api/inventory?resource=consumables-alerts&action=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/consumables-alerts\/?$/,
+      build: () =>
+        "/api/inventory?resource=consumables-alerts&action=status",
+    },
+    {
+      pattern: /^\/api\/integrations\/(test|status)\/?$/,
+      build: (m) =>
+        `/api/inventory?resource=integrations&action=${m[1]}`,
+    },
+    {
+      pattern: /^\/api\/integrations\/?$/,
+      build: () =>
+        "/api/inventory?resource=integrations&action=status",
+    },
   ];
 
   return {
