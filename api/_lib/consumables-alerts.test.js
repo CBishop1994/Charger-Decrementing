@@ -17,6 +17,8 @@ const { resetLocalMemoryDb } = await import("./local-memory-db.js");
 const {
   APPROACHING_RATIO,
   classifyConsumableStock,
+  qtyToOrder,
+  withOpenOrderQuantities,
   buildConsumablesReport,
   renderConsumablesAlertTicket,
   denverWeekKey,
@@ -86,6 +88,30 @@ describe("consumables stock classification", () => {
     const goodIdx = ticket.description.indexOf("## Good");
     assert.ok(outIdx >= 0 && belowIdx > outIdx);
     assert.ok(approachIdx > belowIdx && goodIdx > approachIdx);
+  });
+
+  it("subtracts on-hand and incoming quantities from the min × 2 target", () => {
+    assert.equal(qtyToOrder(2, 5, 3), 5);
+    assert.equal(qtyToOrder(2, 5, 12), 0);
+
+    const report = buildConsumablesReport([
+      {
+        name: "Partially ordered item",
+        quantity: 2,
+        min_level: 5,
+        quantity_on_order: 3,
+        unit: "ea",
+      },
+    ]);
+    assert.equal(report.items[0].restock_target, 10);
+    assert.equal(report.items[0].quantity_on_order, 3);
+    assert.equal(report.items[0].qty_to_order, 5);
+    assert.equal(report.counts.units_to_order, 5);
+
+    const ticket = renderConsumablesAlertTicket({ weekKey: "2026-W41", report });
+    assert.match(ticket.description, /3 ea on order/);
+    assert.match(ticket.description, /order 5 units/);
+    assert.match(ticket.description, /Total additional quantity to order now: 5 units/);
   });
 
   it("applies custom per-piece Jira templates", () => {
@@ -182,6 +208,103 @@ describe("consumables alerts dry-run", () => {
     assert.equal(result.batch?.status, "empty_skipped");
   });
 
+  it("skips Jira/Slack when every active item has a zero minimum", async () => {
+    resetLocalMemoryDb();
+    const now = new Date().toISOString();
+    await supabaseAdmin.from("consumables").insert([
+      {
+        name: "Discontinued Item",
+        sku: "DISC-0",
+        quantity: 0,
+        min_level: 0,
+        unit: "ea",
+        is_active: true,
+        updated_at: now,
+        created_at: now,
+      },
+    ]);
+
+    const result = await runConsumablesWeeklyAlerts({
+      weekKey: denverWeekKey(),
+      dryRun: true,
+      triggeredBy: "test",
+    });
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, "no_items");
+    assert.equal(result.batch?.status, "empty_skipped");
+    assert.match(result.message, /positive minimum stock level/);
+  });
+
+  it("subtracts open order balances and reports the additional Jira total", async () => {
+    resetLocalMemoryDb();
+    const now = new Date().toISOString();
+    const { data: insertedItems } = await supabaseAdmin
+      .from("consumables")
+      .insert([
+        {
+          name: "Open Order Item",
+          sku: "OPEN-1",
+          quantity: 2,
+          min_level: 5,
+          unit: "ea",
+          category: "Test",
+          bin_location: "A-1",
+          asset_tag: "T1",
+          is_active: true,
+          updated_at: now,
+          created_at: now,
+        },
+      ])
+      .select("id");
+    const consumableId = insertedItems[0].id;
+
+    await supabaseAdmin.from("stock_orders").insert([
+      {
+        consumable_id: consumableId,
+        quantity_ordered: 6,
+        quantity_received: 2,
+        status: "ordered",
+        note: "Partial delivery; balance en route",
+        ordered_by: "test",
+        received_by: "",
+        ordered_at: now,
+        delivered_at: "",
+      },
+      {
+        consumable_id: consumableId,
+        quantity_ordered: 10,
+        quantity_received: 10,
+        status: "delivered",
+        note: "Already received",
+        ordered_by: "test",
+        received_by: "test",
+        ordered_at: now,
+        delivered_at: now,
+      },
+    ]);
+
+    const result = await runConsumablesWeeklyAlerts({
+      weekKey: denverWeekKey(),
+      dryRun: true,
+      triggeredBy: "test",
+    });
+
+    assert.equal(result.skipped, false);
+    assert.equal(result.counts?.units_to_order, 4);
+    assert.equal(result.counts?.skus_to_order, 1);
+    assert.equal(result.report?.items[0]?.quantity_on_order, 4);
+    assert.equal(result.report?.items[0]?.qty_to_order, 4);
+    assert.match(result.ticket?.description ?? "", /order 4 units/);
+    assert.match(
+      result.ticket?.description ?? "",
+      /Total additional quantity to order now: 4 units/,
+    );
+    assert.match(
+      result.ticket?.description ?? "",
+      /2 ea on hand \(min 5\) · 4 ea on order · order 4 ea/,
+    );
+  });
+
   it("is idempotent for the same week", async () => {
     const weekKey = denverWeekKey();
     const again = await runConsumablesWeeklyAlerts({
@@ -251,6 +374,19 @@ describe("consumables alerts dry-run", () => {
         created_at: now,
       },
       {
+        name: "No Reorder Item",
+        sku: "NO-ORDER-1",
+        quantity: 0,
+        min_level: 0,
+        unit: "ea",
+        category: "Test",
+        bin_location: "A-5",
+        asset_tag: "T6",
+        is_active: true,
+        updated_at: now,
+        created_at: now,
+      },
+      {
         name: "Inactive",
         sku: "INACT",
         quantity: 0,
@@ -282,6 +418,8 @@ describe("consumables alerts dry-run", () => {
     assert.equal(result.slack?.dryRun, true);
     assert.match(result.ticket?.description ?? "", /## Out of Stock/);
     assert.match(result.ticket?.description ?? "", /Approach Item/);
+    assert.doesNotMatch(result.ticket?.description ?? "", /No Reorder Item/);
+    assert.equal(result.report?.items.some((item) => item.name === "No Reorder Item"), false);
 
     const forced = await runConsumablesWeeklyAlerts({
       weekKey,

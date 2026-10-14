@@ -15,12 +15,12 @@ export const DEFAULT_JIRA_INTRO =
 export const DEFAULT_JIRA_SECTION_HEADING = "## {{title}} ({{count}})";
 
 export const DEFAULT_JIRA_ITEM_LINE =
-  "- {{name}}{{sku_part}}: {{qty}} {{unit}} on hand (min {{min}}){{order_part}}{{bin_part}}";
+  "- {{name}}{{sku_part}}: {{qty}} {{unit}} on hand (min {{min}}){{on_order_part}}{{order_part}}{{bin_part}}";
 
 export const DEFAULT_JIRA_EMPTY_SECTION = "(none)";
 
 export const DEFAULT_JIRA_FOOTER =
-  "Order total: {{order_total}} units to reach restock target (min × 2).";
+  "Total additional quantity to order now: {{order_total}} units, after subtracting on-order stock (min × 2 target).";
 
 /** Layout for description; pieces fill {{intro}}, {{sections}}, {{footer}}. */
 export const DEFAULT_JIRA_DESCRIPTION =

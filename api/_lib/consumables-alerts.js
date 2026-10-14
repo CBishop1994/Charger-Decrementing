@@ -22,6 +22,7 @@
  */
 
 import { supabaseAdmin } from "./supabase-admin.js";
+import { isMissingTableError } from "./errors.js";
 import { isDevAuthEnabled } from "./dev-auth.js";
 import { denverDayKey } from "./denver-day.js";
 import { createJiraIssue, jiraConfigStatus } from "./jira-client.js";
@@ -52,9 +53,42 @@ export function restockTargetQty(minLevel) {
 }
 
 /** Units to order to reach restock target. */
-export function qtyToOrder(quantity, minLevel) {
+export function qtyToOrder(quantity, minLevel, quantityOnOrder = 0) {
   const qty = Math.max(0, Math.trunc(Number(quantity) || 0));
-  return Math.max(0, restockTargetQty(minLevel) - qty);
+  const incoming = Math.max(0, Math.trunc(Number(quantityOnOrder) || 0));
+  return Math.max(0, restockTargetQty(minLevel) - qty - incoming);
+}
+
+/**
+ * Attach the remaining balance of open stock orders to each consumable.
+ * Delivered orders are excluded because received quantities are already in stock.
+ * @param {Array<Record<string, unknown>>} items
+ */
+export async function withOpenOrderQuantities(items) {
+  const { data: orders, error } = await supabaseAdmin
+    .from("stock_orders")
+    .select("consumable_id,quantity_ordered,quantity_received,status")
+    .eq("status", "ordered");
+
+  if (error && !isMissingTableError(error.message || String(error))) {
+    throw error;
+  }
+
+  const quantities = new Map();
+  for (const order of orders ?? []) {
+    if (order.status !== "ordered") continue;
+    const ordered = Math.max(0, Math.trunc(Number(order.quantity_ordered) || 0));
+    const received = Math.max(0, Math.trunc(Number(order.quantity_received) || 0));
+    const remaining = Math.max(0, ordered - received);
+    const id = Number(order.consumable_id);
+    if (!Number.isFinite(id) || remaining <= 0) continue;
+    quantities.set(id, (quantities.get(id) ?? 0) + remaining);
+  }
+
+  return items.map((item) => ({
+    ...item,
+    quantity_on_order: quantities.get(Number(item.id)) ?? 0,
+  }));
 }
 
 export const STATUS_ORDER = [
@@ -137,13 +171,15 @@ export function buildConsumablesReport(items, opts = {}) {
     const qty = Math.max(0, Number(item?.quantity) || 0);
     const min = Math.max(0, Number(item?.min_level) || 0);
     const target = restockTargetQty(min);
-    const orderQty = qtyToOrder(qty, min);
+    const onOrder = Math.max(0, Math.trunc(Number(item?.quantity_on_order) || 0));
+    const orderQty = qtyToOrder(qty, min, onOrder);
     const row = {
       id: Number(item?.id) || 0,
       name: String(item?.name ?? "Item"),
       sku: String(item?.sku ?? ""),
       quantity: qty,
       min_level: min,
+      quantity_on_order: onOrder,
       unit: String(item?.unit ?? "ea").trim() || "ea",
       bin_location: String(item?.bin_location ?? ""),
       category: String(item?.category ?? ""),
@@ -226,10 +262,11 @@ function formatItemLine(item, itemLineTpl) {
   const min = Number(item.min_level) || 0;
   const unit = String(item.unit ?? "ea").trim() || "ea";
   const bin = String(item.bin_location ?? "").trim();
+  const onOrder = Math.max(0, Math.trunc(Number(item.quantity_on_order) || 0));
   const order =
     item.qty_to_order != null
       ? Number(item.qty_to_order) || 0
-      : qtyToOrder(qty, min);
+      : qtyToOrder(qty, min, onOrder);
   const target =
     item.restock_target != null
       ? Number(item.restock_target) || 0
@@ -242,6 +279,9 @@ function formatItemLine(item, itemLineTpl) {
     unit,
     bin,
     order,
+    on_order: onOrder,
+    quantity_on_order: onOrder,
+    on_order_part: onOrder > 0 ? ` · ${onOrder} ${unit} on order` : "",
     restock_target: target,
     sku_part: sku ? ` [${sku}]` : "",
     order_part: order > 0 ? ` · order ${order} ${unit}` : "",
@@ -450,7 +490,9 @@ export async function runConsumablesWeeklyAlerts(opts = {}) {
     .order("name", { ascending: true });
   if (itemsErr) throw itemsErr;
 
-  const list = items ?? [];
+  // A zero minimum means the item is not replenished; omit it from weekly
+  // Jira/Slack reports while leaving the Alerts status inventory untouched.
+  const list = (items ?? []).filter((item) => Number(item?.min_level) > 0);
   if (list.length === 0) {
     const { data: emptyBatch, error: emptyErr } = await supabaseAdmin
       .from("consumables_alert_batches")
@@ -484,9 +526,12 @@ export async function runConsumablesWeeklyAlerts(opts = {}) {
       dryRun,
       triggeredBy,
       settings,
-      message: "No active consumables — Jira and Slack skipped.",
+      message: "No active consumables with a positive minimum stock level — Jira and Slack skipped.",
     };
   }
+
+  // Reconcile ordered-but-unreceived stock before calculating what remains to order.
+  const itemsWithOpenOrders = await withOpenOrderQuantities(list);
 
   // Local destage: auto dry-run only when BOTH integrations lack live config.
   // Partial config fails loudly below (do not silently skip a real Slack post).
@@ -533,7 +578,7 @@ export async function runConsumablesWeeklyAlerts(opts = {}) {
     );
   }
 
-  const report = buildConsumablesReport(list, {
+  const report = buildConsumablesReport(itemsWithOpenOrders, {
     approachingRatio: settings.approaching_ratio,
   });
   const ticket = renderConsumablesAlertTicket({
