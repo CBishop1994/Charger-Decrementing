@@ -2,9 +2,8 @@ import type { ConsumablesAlertSkuRow } from "@/lib/api";
 
 const STATUS_SECTIONS = [
   { key: "out_of_stock", title: "Out of Stock", include: "include_out_of_stock" },
-  { key: "below_minimum", title: "Below minimum", include: "include_below_minimum" },
+  { key: "below_minimum", title: "Below Minimum", include: "include_below_minimum" },
   { key: "approaching", title: "Approaching minimum", include: "include_approaching" },
-  { key: "good", title: "Good", include: "include_good" },
 ] as const;
 
 export type AlertTemplateDraft = {
@@ -44,6 +43,7 @@ function formatItemLine(
   const min = Number(item.min_level) || 0;
   const unit = (item.unit || "ea").trim() || "ea";
   const bin = (item.bin_location || "").trim();
+  const onOrder = Math.max(0, Math.trunc(Number(item.quantity_on_order) || 0));
   const order = Number(item.qty_to_order) || 0;
   const target = Number(item.restock_target) || min * 2;
   return applyTemplate(itemLineTpl, {
@@ -56,7 +56,8 @@ function formatItemLine(
     order,
     restock_target: target,
     sku_part: sku ? ` [${sku}]` : "",
-    order_part: order > 0 ? ` · order ${order} ${unit}` : "",
+    on_order_part: onOrder > 0 ? ` · **${onOrder} ${unit} on order**` : "",
+    order_part: order > 0 ? ` · **order ${order} ${unit}**` : "",
     bin_part: bin ? ` · bin ${bin}` : "",
   }).trimEnd();
 }
@@ -67,7 +68,9 @@ export function previewAlertTicket(opts: {
   items: ConsumablesAlertSkuRow[];
   draft: AlertTemplateDraft;
 }): { summary: string; description: string } {
-  const items = opts.items ?? [];
+  const items = (opts.items ?? []).filter(
+    (item) => Number(item.min_level) > 0,
+  );
   const byStatus = {
     out_of_stock: items.filter((i) => i.status === "out_of_stock"),
     below_minimum: items.filter((i) => i.status === "below_minimum"),
@@ -129,10 +132,11 @@ export function previewAlertTicket(opts: {
     approaching_count: counts.approaching,
     good_count: counts.good,
     total: counts.total,
+    report_total: counts.out_of_stock + counts.below_minimum + counts.approaching,
     order_total: orderTotal,
     skus_to_order: counts.skus_to_order,
     order_summary_clause:
-      orderTotal > 0 ? ` · order ${orderTotal} units` : "",
+      orderTotal > 0 ? ` · **order ${orderTotal} units**` : "",
   };
 
   const intro = applyTemplate(

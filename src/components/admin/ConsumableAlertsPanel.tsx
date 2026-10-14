@@ -102,11 +102,30 @@ const MD_BREAKPOINT = 768;
 
 function templatesFromSettings(s: ConsumablesAlertSettings): TemplateValues {
   const next = { ...DEFAULT_ALERT_TEMPLATE_VALUES };
+  const legacyDefaults: Partial<Record<AlertTemplatePieceField, string[]>> = {
+    jira_summary_template: [
+      "Consumables weekly inventory {{week}}: {{out_count}} out, {{below_count}} below min, {{approaching_count}} approaching, {{good_count}} good",
+    ],
+    jira_intro_template: [
+      "Summary: {{out_count}} out of stock · {{below_count}} below minimum · {{approaching_count}} approaching · {{good_count}} good ({{total}} active items){{order_summary_clause}}",
+    ],
+    jira_section_heading_template: ["## {{title}} ({{count}})"],
+    jira_item_line_template: [
+      "- {{name}}{{sku_part}}: {{qty}} {{unit}} on hand (min {{min}}){{order_part}}{{bin_part}}",
+    ],
+    jira_footer_template: [
+      "Order total: {{order_total}} units to reach restock target (min × 2).",
+      "Total additional quantity to order now: {{order_total}} units, after subtracting on-order stock (min × 2 target).",
+    ],
+  };
   for (const piece of ALERT_TEMPLATE_PIECES) {
     const raw = s[piece.field];
+    const value = typeof raw === "string" ? raw.trim() : "";
+    const isLegacyDefault = legacyDefaults[piece.field]?.includes(value) ?? false;
     next[piece.field] =
-      (typeof raw === "string" && raw.trim()) ||
-      DEFAULT_ALERT_TEMPLATE_VALUES[piece.field];
+      value && !isLegacyDefault
+        ? value
+        : DEFAULT_ALERT_TEMPLATE_VALUES[piece.field];
   }
   return next;
 }
@@ -178,7 +197,7 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
   const [incOut, setIncOut] = useState(true);
   const [incBelow, setIncBelow] = useState(true);
   const [incApproach, setIncApproach] = useState(true);
-  const [incGood, setIncGood] = useState(true);
+
   const [weekday, setWeekday] = useState("1");
   const [hour, setHour] = useState("8");
   const [slackChannel, setSlackChannel] = useState("");
@@ -196,7 +215,7 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
     setIncOut(s.include_out_of_stock !== false);
     setIncBelow(s.include_below_minimum !== false);
     setIncApproach(s.include_approaching !== false);
-    setIncGood(s.include_good !== false);
+
     setWeekday(String(s.schedule_weekday ?? 1));
     setHour(String(s.schedule_hour_mst ?? 8));
     setSlackChannel(s.slack_channel_id ?? "");
@@ -307,7 +326,7 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
           include_out_of_stock: incOut,
           include_below_minimum: incBelow,
           include_approaching: incApproach,
-          include_good: incGood,
+          include_good: false,
           schedule_weekday: Number(weekday),
           schedule_hour_mst: Number(hour),
           slack_channel_id: slackChannel,
@@ -379,7 +398,7 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
         include_out_of_stock: incOut,
         include_below_minimum: incBelow,
         include_approaching: incApproach,
-        include_good: incGood,
+        include_good: false,
         ...templates,
       },
     });
@@ -389,7 +408,7 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
     incOut,
     incBelow,
     incApproach,
-    incGood,
+
     templates,
   ]);
 
@@ -684,7 +703,6 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
                       ["Out of stock", incOut, setIncOut],
                       ["Below minimum", incBelow, setIncBelow],
                       ["Approaching", incApproach, setIncApproach],
-                      ["Good", incGood, setIncGood],
                     ] as const
                   ).map(([label, checked, setChecked]) => (
                     <label

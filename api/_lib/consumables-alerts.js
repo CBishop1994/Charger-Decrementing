@@ -237,16 +237,13 @@ function includedSectionKeys(settings) {
     sections.push({ title: "Out of Stock", key: "out_of_stock" });
   }
   if (settings?.include_below_minimum !== false) {
-    sections.push({ title: "Below minimum", key: "below_minimum" });
+    sections.push({ title: "Below Minimum", key: "below_minimum" });
   }
   if (settings?.include_approaching !== false) {
     sections.push({
       title: "Approaching minimum",
       key: "approaching",
     });
-  }
-  if (settings?.include_good !== false) {
-    sections.push({ title: "Good", key: "good" });
   }
   return sections;
 }
@@ -281,10 +278,10 @@ function formatItemLine(item, itemLineTpl) {
     order,
     on_order: onOrder,
     quantity_on_order: onOrder,
-    on_order_part: onOrder > 0 ? ` · ${onOrder} ${unit} on order` : "",
+    on_order_part: onOrder > 0 ? ` · **${onOrder} ${unit} on order**` : "",
     restock_target: target,
     sku_part: sku ? ` [${sku}]` : "",
-    order_part: order > 0 ? ` · order ${order} ${unit}` : "",
+    order_part: order > 0 ? ` · **order ${order} ${unit}**` : "",
     bin_part: bin ? ` · bin ${bin}` : "",
   }).trimEnd();
 }
@@ -303,7 +300,7 @@ export function renderConsumablesAlertTicket(opts) {
     include_out_of_stock: true,
     include_below_minimum: true,
     include_approaching: true,
-    include_good: true,
+    include_good: false,
     jira_summary_template: DEFAULT_JIRA_SUMMARY,
     jira_intro_template: DEFAULT_JIRA_INTRO,
     jira_section_heading_template: DEFAULT_JIRA_SECTION_HEADING,
@@ -363,10 +360,11 @@ export function renderConsumablesAlertTicket(opts) {
     approaching_count: c.approaching,
     good_count: c.good,
     total: c.total,
+    report_total: c.out_of_stock + c.below_minimum + c.approaching,
     order_total: orderTotal,
     skus_to_order: Number(c.skus_to_order) || 0,
     order_summary_clause:
-      orderTotal > 0 ? ` · order ${orderTotal} units` : "",
+      orderTotal > 0 ? ` · **order ${orderTotal} units**` : "",
   };
 
   const introTpl =

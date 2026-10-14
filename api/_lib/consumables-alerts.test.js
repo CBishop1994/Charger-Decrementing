@@ -25,8 +25,39 @@ const {
   runConsumablesWeeklyAlerts,
 } = await import("./consumables-alerts.js");
 const { supabaseAdmin } = await import("./supabase-admin.js");
+const { jiraDescriptionToAdf } = await import("./jira-client.js");
+const {
+  DEFAULT_JIRA_FOOTER,
+  DEFAULT_JIRA_INTRO,
+  DEFAULT_JIRA_SECTION_HEADING,
+  DEFAULT_JIRA_SUMMARY,
+  serializeAlertSettings,
+} = await import("./consumables-alert-settings.js");
 
 describe("consumables stock classification", () => {
+  it("converts bold Jira report headings and order amounts to ADF", () => {
+    const doc = jiraDescriptionToAdf(
+      "## **Out of Stock (1)**\n- Widget: **order 4 ea**\nTotal: **4 units**",
+    );
+    assert.equal(doc.type, "doc");
+    assert.equal(doc.content[0].type, "heading");
+    assert.equal(doc.content[0].attrs.level, 2);
+    assert.deepEqual(doc.content[0].content[0], {
+      type: "text",
+      text: "Out of Stock (1)",
+      marks: [{ type: "strong" }],
+    });
+    assert.deepEqual(doc.content[1].content[1], {
+      type: "text",
+      text: "order 4 ea",
+      marks: [{ type: "strong" }],
+    });
+    assert.deepEqual(doc.content[2].content[1], {
+      type: "text",
+      text: "4 units",
+      marks: [{ type: "strong" }],
+    });
+  });
   it("orders buckets and applies approaching = min × 1.25", () => {
     assert.equal(APPROACHING_RATIO, 1.25);
     assert.equal(classifyConsumableStock({ quantity: 0, min_level: 10 }), "out_of_stock");
@@ -80,14 +111,41 @@ describe("consumables stock classification", () => {
     assert.equal(ticket.description.includes("Approaching ratio:"), false);
     assert.equal(ticket.description.includes("Timezone:"), false);
     assert.match(ticket.description, /^Summary:/);
-    assert.match(ticket.description, /order 22 units/);
-    assert.match(ticket.description, /· order 10 ea/);
-    const outIdx = ticket.description.indexOf("## Out of Stock");
-    const belowIdx = ticket.description.indexOf("## Below minimum");
-    const approachIdx = ticket.description.indexOf("## Approaching minimum");
-    const goodIdx = ticket.description.indexOf("## Good");
+    assert.match(ticket.description, /\*\*order 22 units\*\*/);
+    assert.match(ticket.description, /· \*\*order 10 ea\*\*/);
+    const outIdx = ticket.description.indexOf("## **Out of Stock (1)**");
+    const belowIdx = ticket.description.indexOf("## **Below Minimum (1)**");
+    const approachIdx = ticket.description.indexOf("## **Approaching minimum (1)**");
+    const goodIdx = ticket.description.indexOf("## **Good");
     assert.ok(outIdx >= 0 && belowIdx > outIdx);
-    assert.ok(approachIdx > belowIdx && goodIdx > approachIdx);
+    assert.ok(approachIdx > belowIdx && goodIdx === -1);
+    assert.match(ticket.description, /3 items requiring attention/);
+    assert.ok(ticket.description.includes("Total additional quantity to order now: **22 units**"));
+    assert.equal(ticket.description.includes("Z Good"), false);
+    assert.equal(ticket.description.toLowerCase().includes("1 good"), false);
+  });
+
+  it("updates saved built-in Jira templates while preserving custom templates", () => {
+    const settings = serializeAlertSettings({
+      include_good: true,
+      jira_summary_template:
+        "Consumables weekly inventory {{week}}: {{out_count}} out, {{below_count}} below min, {{approaching_count}} approaching, {{good_count}} good",
+      jira_intro_template:
+        "Summary: {{out_count}} out of stock · {{below_count}} below minimum · {{approaching_count}} approaching · {{good_count}} good ({{total}} active items){{order_summary_clause}}",
+      jira_section_heading_template: "## {{title}} ({{count}})",
+      jira_footer_template:
+        "Total additional quantity to order now: {{order_total}} units, after subtracting on-order stock (min × 2 target).",
+    });
+    assert.equal(settings.include_good, false);
+    assert.equal(settings.jira_summary_template, DEFAULT_JIRA_SUMMARY);
+    assert.equal(settings.jira_intro_template, DEFAULT_JIRA_INTRO);
+    assert.equal(settings.jira_section_heading_template, DEFAULT_JIRA_SECTION_HEADING);
+    assert.equal(settings.jira_footer_template, DEFAULT_JIRA_FOOTER);
+
+    const custom = serializeAlertSettings({
+      jira_summary_template: "Custom summary {{week}}",
+    });
+    assert.equal(custom.jira_summary_template, "Custom summary {{week}}");
   });
 
   it("subtracts on-hand and incoming quantities from the min × 2 target", () => {
@@ -109,9 +167,13 @@ describe("consumables stock classification", () => {
     assert.equal(report.counts.units_to_order, 5);
 
     const ticket = renderConsumablesAlertTicket({ weekKey: "2026-W41", report });
-    assert.match(ticket.description, /3 ea on order/);
-    assert.match(ticket.description, /order 5 units/);
-    assert.match(ticket.description, /Total additional quantity to order now: 5 units/);
+    assert.ok(ticket.description.includes("**3 ea on order**"));
+    assert.ok(ticket.description.includes("**order 5 units**"));
+    assert.ok(
+      ticket.description.includes(
+        "Total additional quantity to order now: **5 units**",
+      ),
+    );
   });
 
   it("applies custom per-piece Jira templates", () => {
@@ -159,7 +221,7 @@ describe("consumables stock classification", () => {
         include_good: false,
       },
     });
-    assert.match(ticket.description, /## Out of Stock/);
+    assert.ok(ticket.description.includes("## **Out of Stock"));
     assert.equal(ticket.description.includes("## Good"), false);
   });
 
@@ -294,14 +356,16 @@ describe("consumables alerts dry-run", () => {
     assert.equal(result.counts?.skus_to_order, 1);
     assert.equal(result.report?.items[0]?.quantity_on_order, 4);
     assert.equal(result.report?.items[0]?.qty_to_order, 4);
-    assert.match(result.ticket?.description ?? "", /order 4 units/);
-    assert.match(
-      result.ticket?.description ?? "",
-      /Total additional quantity to order now: 4 units/,
+    assert.ok(result.ticket?.description.includes("**order 4 units**"));
+    assert.ok(
+      result.ticket?.description.includes(
+        "Total additional quantity to order now: **4 units**",
+      ),
     );
-    assert.match(
-      result.ticket?.description ?? "",
-      /2 ea on hand \(min 5\) · 4 ea on order · order 4 ea/,
+    assert.ok(
+      result.ticket?.description.includes(
+        "2 ea on hand (min 5) · **4 ea on order** · **order 4 ea**",
+      ),
     );
   });
 
@@ -416,7 +480,7 @@ describe("consumables alerts dry-run", () => {
     assert.ok(result.issue?.key);
     assert.equal(result.issue?.dryRun, true);
     assert.equal(result.slack?.dryRun, true);
-    assert.match(result.ticket?.description ?? "", /## Out of Stock/);
+    assert.ok(result.ticket?.description.includes("## **Out of Stock"));
     assert.match(result.ticket?.description ?? "", /Approach Item/);
     assert.doesNotMatch(result.ticket?.description ?? "", /No Reorder Item/);
     assert.equal(result.report?.items.some((item) => item.name === "No Reorder Item"), false);

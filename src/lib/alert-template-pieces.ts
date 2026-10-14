@@ -37,7 +37,7 @@ export const ALERT_TEMPLATE_PIECES: AlertTemplatePieceDef[] = [
     id: "issue_summary",
     field: "jira_summary_template",
     label: "Issue summary",
-    hint: "{{week}}, {{out_count}}, {{below_count}}, {{approaching_count}}, {{good_count}}, {{total}}, {{order_total}}, {{skus_to_order}}",
+    hint: "{{week}}, {{out_count}}, {{below_count}}, {{approaching_count}}, {{report_total}}, {{order_total}}, {{skus_to_order}}",
     rows: 2,
     isDescription: false,
   },
@@ -61,7 +61,7 @@ export const ALERT_TEMPLATE_PIECES: AlertTemplatePieceDef[] = [
     id: "item_line",
     field: "jira_item_line_template",
     label: "Item line",
-    hint: "{{name}}, {{sku}}, {{qty}}, {{min}}, {{unit}}, {{bin}}, {{order}}, {{restock_target}}, {{sku_part}}, {{order_part}}, {{bin_part}}",
+    hint: "{{name}}, {{sku}}, {{qty}}, {{min}}, {{unit}}, {{bin}}, {{order}}, {{restock_target}}, {{sku_part}}, {{on_order_part}}, {{order_part}}, {{bin_part}}",
     rows: 3,
     isDescription: true,
   },
@@ -96,15 +96,15 @@ export const DEFAULT_ALERT_TEMPLATE_VALUES: Record<
   string
 > = {
   jira_summary_template:
-    "Consumables weekly inventory {{week}}: {{out_count}} out, {{below_count}} below min, {{approaching_count}} approaching, {{good_count}} good",
+    "Consumables weekly inventory {{week}}: {{out_count}} out, {{below_count}} below min, {{approaching_count}} approaching",
   jira_intro_template:
-    "Summary: {{out_count}} out of stock · {{below_count}} below minimum · {{approaching_count}} approaching · {{good_count}} good ({{total}} active items){{order_summary_clause}}",
-  jira_section_heading_template: "## {{title}} ({{count}})",
+    "Summary: {{out_count}} out of stock · {{below_count}} below minimum · {{approaching_count}} approaching ({{report_total}} items requiring attention){{order_summary_clause}}",
+  jira_section_heading_template: "## **{{title}} ({{count}})**",
   jira_item_line_template:
-    "- {{name}}{{sku_part}}: {{qty}} {{unit}} on hand (min {{min}}){{order_part}}{{bin_part}}",
+    "- {{name}}{{sku_part}}: {{qty}} {{unit}} on hand (min {{min}}){{on_order_part}}{{order_part}}{{bin_part}}",
   jira_empty_section_template: "(none)",
   jira_footer_template:
-    "Order total: {{order_total}} units to reach restock target (min × 2).",
+    "Total additional quantity to order now: **{{order_total}} units**, after subtracting on-order stock (min × 2 target).",
   jira_description_template: "{{intro}}\n\n{{sections}}\n\n{{footer}}",
 };
 

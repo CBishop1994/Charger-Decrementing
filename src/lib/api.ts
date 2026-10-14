@@ -464,6 +464,8 @@ export type ConsumablesAlertSkuRow = {
   approaching_ratio: number;
   /** Restock fill target (min × 2). */
   restock_target?: number;
+  /** Units already ordered and not yet received. */
+  quantity_on_order?: number;
   /** Units to order to reach restock target. */
   qty_to_order?: number;
 };

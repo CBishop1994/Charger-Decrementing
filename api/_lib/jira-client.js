@@ -59,6 +59,54 @@ export function jiraConfigStatus(overrides = {}) {
 }
 
 /**
+ * Convert the report's lightweight Markdown headings/bold spans to Jira ADF.
+ * @param {unknown} value
+ */
+export function jiraDescriptionToAdf(value) {
+  const inlineContent = (line) => {
+    const content = [];
+    const bold = /\*\*([^*]+)\*\*/g;
+    let cursor = 0;
+    let match;
+
+    while ((match = bold.exec(line))) {
+      if (match.index > cursor) {
+        content.push({ type: "text", text: line.slice(cursor, match.index) });
+      }
+      content.push({
+        type: "text",
+        text: match[1],
+        marks: [{ type: "strong" }],
+      });
+      cursor = match.index + match[0].length;
+    }
+
+    if (cursor < line.length) {
+      content.push({ type: "text", text: line.slice(cursor) });
+    }
+    return content;
+  };
+
+  const content = String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => {
+      if (line.trim() === "") return { type: "paragraph", content: [] };
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
+      if (heading) {
+        return {
+          type: "heading",
+          attrs: { level: heading[1].length },
+          content: inlineContent(heading[2]),
+        };
+      }
+      return { type: "paragraph", content: inlineContent(line) };
+    });
+
+  return { type: "doc", version: 1, content };
+}
+
+/**
  * @param {{ summary: string, description: string, projectKey?: string, issueType?: string, dryRun?: boolean }} input
  * @returns {Promise<{ key: string, id: string, self: string, url: string, dryRun: boolean }>}
  */
@@ -102,20 +150,7 @@ export async function createJiraIssue(input) {
       project: { key: cfg.projectKey },
       summary: String(input.summary ?? "").slice(0, 255),
       issuetype: { name: cfg.issueType },
-      description: {
-        type: "doc",
-        version: 1,
-        content: String(input.description ?? "")
-          .split(/\n/)
-          .map((line) =>
-            line.trim() === ""
-              ? { type: "paragraph", content: [] }
-              : {
-                  type: "paragraph",
-                  content: [{ type: "text", text: line }],
-                },
-          ),
-      },
+      description: jiraDescriptionToAdf(input.description),
     },
   };
 

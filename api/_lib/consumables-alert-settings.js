@@ -7,12 +7,19 @@ import { supabaseAdmin } from "./supabase-admin.js";
 export const DEFAULT_APPROACHING_RATIO = 1.25;
 
 export const DEFAULT_JIRA_SUMMARY =
-  "Consumables weekly inventory {{week}}: {{out_count}} out, {{below_count}} below min, {{approaching_count}} approaching, {{good_count}} good";
+  "Consumables weekly inventory {{week}}: {{out_count}} out, {{below_count}} below min, {{approaching_count}} approaching";
 
 export const DEFAULT_JIRA_INTRO =
+  "Summary: {{out_count}} out of stock · {{below_count}} below minimum · {{approaching_count}} approaching ({{report_total}} items requiring attention){{order_summary_clause}}";
+
+const LEGACY_JIRA_SUMMARY =
+  "Consumables weekly inventory {{week}}: {{out_count}} out, {{below_count}} below min, {{approaching_count}} approaching, {{good_count}} good";
+const LEGACY_JIRA_INTRO =
   "Summary: {{out_count}} out of stock · {{below_count}} below minimum · {{approaching_count}} approaching · {{good_count}} good ({{total}} active items){{order_summary_clause}}";
 
-export const DEFAULT_JIRA_SECTION_HEADING = "## {{title}} ({{count}})";
+export const DEFAULT_JIRA_SECTION_HEADING = "## **{{title}} ({{count}})**";
+
+const LEGACY_JIRA_SECTION_HEADING = "## {{title}} ({{count}})";
 
 export const DEFAULT_JIRA_ITEM_LINE =
   "- {{name}}{{sku_part}}: {{qty}} {{unit}} on hand (min {{min}}){{on_order_part}}{{order_part}}{{bin_part}}";
@@ -20,6 +27,9 @@ export const DEFAULT_JIRA_ITEM_LINE =
 export const DEFAULT_JIRA_EMPTY_SECTION = "(none)";
 
 export const DEFAULT_JIRA_FOOTER =
+  "Total additional quantity to order now: **{{order_total}} units**, after subtracting on-order stock (min × 2 target).";
+
+const LEGACY_JIRA_FOOTER =
   "Total additional quantity to order now: {{order_total}} units, after subtracting on-order stock (min × 2 target).";
 
 /** Layout for description; pieces fill {{intro}}, {{sections}}, {{footer}}. */
@@ -32,7 +42,7 @@ export const DEFAULT_ALERT_SETTINGS = {
   include_out_of_stock: true,
   include_below_minimum: true,
   include_approaching: true,
-  include_good: true,
+  include_good: false,
   schedule_weekday: 1,
   schedule_hour_mst: 8,
   slack_channel_id: "",
@@ -188,9 +198,17 @@ export function consumablesAlertsScheduleLabelFromSettings(settings) {
 }
 
 /**
- * Normalize settings row for API responses.
- * @param {Record<string, unknown>} row
+ * Prefer current defaults while preserving operator-authored Jira templates.
+ * @param {unknown} value
+ * @param {string} defaultValue
+ * @param {string} [legacyValue]
  */
+function normalizeJiraTemplate(value, defaultValue, legacyValue) {
+  const template = String(value ?? "").trim();
+  return !template || template === legacyValue ? defaultValue : template;
+}
+
+/** Normalize a settings row for API responses. @param {Record<string, unknown>} row */
 export function serializeAlertSettings(row) {
   return {
     id: Number(row?.id) || 1,
@@ -209,8 +227,7 @@ export function serializeAlertSettings(row) {
       row?.include_approaching == null
         ? true
         : Boolean(row.include_approaching),
-    include_good:
-      row?.include_good == null ? true : Boolean(row.include_good),
+    include_good: false,
     schedule_weekday: normalizeWeekday(row?.schedule_weekday, 1),
     schedule_hour_mst: normalizeHourMst(row?.schedule_hour_mst, 8),
     slack_channel_id: String(row?.slack_channel_id ?? ""),
@@ -218,19 +235,34 @@ export function serializeAlertSettings(row) {
     jira_project_key: String(row?.jira_project_key ?? ""),
     jira_issue_type: String(row?.jira_issue_type ?? ""),
     jira_summary_template:
-      String(row?.jira_summary_template ?? "").trim() || DEFAULT_JIRA_SUMMARY,
+      normalizeJiraTemplate(
+        row?.jira_summary_template,
+        DEFAULT_JIRA_SUMMARY,
+        LEGACY_JIRA_SUMMARY,
+      ),
     jira_intro_template:
-      String(row?.jira_intro_template ?? "").trim() || DEFAULT_JIRA_INTRO,
+      normalizeJiraTemplate(
+        row?.jira_intro_template,
+        DEFAULT_JIRA_INTRO,
+        LEGACY_JIRA_INTRO,
+      ),
     jira_section_heading_template:
-      String(row?.jira_section_heading_template ?? "").trim() ||
-      DEFAULT_JIRA_SECTION_HEADING,
+      normalizeJiraTemplate(
+        row?.jira_section_heading_template,
+        DEFAULT_JIRA_SECTION_HEADING,
+        LEGACY_JIRA_SECTION_HEADING,
+      ),
     jira_item_line_template:
       String(row?.jira_item_line_template ?? "").trim() || DEFAULT_JIRA_ITEM_LINE,
     jira_empty_section_template:
       String(row?.jira_empty_section_template ?? "").trim() ||
       DEFAULT_JIRA_EMPTY_SECTION,
     jira_footer_template:
-      String(row?.jira_footer_template ?? "").trim() || DEFAULT_JIRA_FOOTER,
+      normalizeJiraTemplate(
+        row?.jira_footer_template,
+        DEFAULT_JIRA_FOOTER,
+        LEGACY_JIRA_FOOTER,
+      ),
     jira_description_template:
       String(row?.jira_description_template ?? "").trim() ||
       DEFAULT_JIRA_DESCRIPTION,
