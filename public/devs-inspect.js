@@ -145,7 +145,7 @@
     }
   })();
 
-  var INSPECT_SCRIPT_VERSION = '2026-08-14.preview-location-v5';
+  var INSPECT_SCRIPT_VERSION = '2026-10-14.console-gate-v1';
   var inspectEnabled = false;
   var deckEditEnabled = false;
   var deckEditingEl = null;
@@ -3225,76 +3225,217 @@
     captureElement(el, selectionToken);
   }, { capture: true, passive: false });
 
-  // Forward console output to parent for the Logs panel
-  var _origLog = console.log;
-  var _origWarn = console.warn;
-  var _origError = console.error;
-  var _origInfo = console.info;
-
-  function forwardConsole(level, args) {
+  // Forward console output, runtime errors, rejections and failed fetches to
+  // the parent through the single rate-limited gate. See CONSOLE_GATE_SNIPPET.
+  (function() {
     try {
-      var parts = [];
-      for (var i = 0; i < args.length; i++) {
-        var a = args[i];
-        parts.push(typeof a === 'string' ? a : JSON.stringify(a));
+      // --- Limits (one block; see the coupling note above) ---
+      var RAW_CEILING_PER_SECOND = 200;
+      var MIN_INTERVAL_MS = 10000;
+      var BUCKET_CAPACITY = 30;
+      var BUCKET_REFILL_PER_SECOND = 30;
+      var SESSION_BUDGET_LOG_INFO = 1000;
+      var SESSION_BUDGET_WARN_ERROR = 2000;
+      var TEXT_MAX_LENGTH = 2000;
+      var MAX_TRACKED_LINES = 20;
+
+      var rawWindowStart = 0;
+      var rawCount = 0;
+      var droppedRaw = 0;
+      var droppedRate = 0;
+      var tokens = BUCKET_CAPACITY;
+      var tokensAt = Date.now();
+      var budgets = { logInfo: SESSION_BUDGET_LOG_INFO, warnError: SESSION_BUDGET_WARN_ERROR };
+      var noticeSent = { logInfo: false, warnError: false };
+      var lines = {};
+      var lineKeys = [];
+      var flushTimer = null;
+      var flushAt = 0;
+
+      function send(message) {
+        try { window.parent.postMessage(message, '*'); } catch (e) { /* parent gone */ }
       }
-      window.parent.postMessage({
-        type: 'devs:console',
-        level: level,
-        text: parts.join(' ')
-      }, '*');
-    } catch (e) { /* ignore serialization errors */ }
-  }
 
-  console.log = function() { forwardConsole('log', arguments); return _origLog.apply(console, arguments); };
-  console.warn = function() { forwardConsole('warn', arguments); return _origWarn.apply(console, arguments); };
-  console.error = function() { forwardConsole('error', arguments); return _origError.apply(console, arguments); };
-  console.info = function() { forwardConsole('info', arguments); return _origInfo.apply(console, arguments); };
+      function budgetClass(level) {
+        return level === 'warn' || level === 'error' ? 'warnError' : 'logInfo';
+      }
 
-  // Forward unhandled errors
-  window.addEventListener('error', function(e) {
-    window.parent.postMessage({
-      type: 'devs:console',
-      level: 'error',
-      text: '[Runtime Error] ' + (e.message || String(e.error))
-    }, '*');
-  });
-
-  window.addEventListener('unhandledrejection', function(e) {
-    window.parent.postMessage({
-      type: 'devs:console',
-      level: 'error',
-      text: '[Unhandled Promise] ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason))
-    }, '*');
-  });
-
-  // Intercept fetch to detect failed HTTP responses (4xx/5xx)
-  var _origFetch = window.fetch;
-  window.fetch = function() {
-    var url = arguments[0];
-    var urlStr = typeof url === 'string' ? url : (url && url.url ? url.url : String(url));
-    return _origFetch.apply(this, arguments).then(function(response) {
-      if (!response.ok && response.status >= 400) {
-        var level = response.status >= 500 ? 'error' : 'warn';
-        var label = response.status >= 500 ? 'Server error' : 'Request failed';
-        try {
-          var path = new URL(urlStr, location.origin).pathname;
-          window.parent.postMessage({
-            type: 'devs:console',
-            level: level,
-            text: '[HTTP ' + response.status + '] ' + label + ': ' + path
-          }, '*');
-        } catch(e) {
-          window.parent.postMessage({
-            type: 'devs:console',
-            level: level,
-            text: '[HTTP ' + response.status + '] ' + label + ': (unparseable URL)'
-          }, '*');
+      function takeToken(now) {
+        var elapsed = now - tokensAt;
+        if (elapsed > 0) {
+          tokens = Math.min(BUCKET_CAPACITY, tokens + (elapsed * BUCKET_REFILL_PER_SECOND) / 1000);
         }
+        tokensAt = now;
+        if (tokens < 1) return false;
+        tokens -= 1;
+        return true;
       }
-      return response;
-    });
-  };
+
+      // Sends one message if the session budget and the rate limit allow it.
+      function emit(level, text, count, now) {
+        var cls = budgetClass(level);
+        if (budgets[cls] <= 0) {
+          if (!noticeSent[cls]) {
+            noticeSent[cls] = true;
+            send({
+              type: 'devs:console',
+              level: 'info',
+              text: '[devs-inspect] Console output suppressed: the ' +
+                (cls === 'warnError' ? 'warn/error' : 'log/info') +
+                ' session budget is exhausted. Further output of this kind is not forwarded until the preview reloads.',
+              suppressed: true
+            });
+          }
+          return false;
+        }
+        if (!takeToken(now)) {
+          droppedRate += count;
+          return false;
+        }
+        budgets[cls] -= 1;
+        var message = { type: 'devs:console', level: level, text: text };
+        if (count > 1) message.count = count;
+        send(message);
+        return true;
+      }
+
+      function flushEntry(entry, now) {
+        var count = entry.pending;
+        entry.pending = 0;
+        if (count > 0 && emit(entry.level, entry.text, count, now)) entry.lastSent = now;
+      }
+
+      function schedule(delay) {
+        var now = Date.now();
+        if (flushTimer !== null) {
+          if (flushAt <= now + delay) return;
+          window.clearTimeout(flushTimer);
+        }
+        flushAt = now + delay;
+        flushTimer = window.setTimeout(flushDue, delay);
+      }
+
+      function flushDue() {
+        flushTimer = null;
+        try {
+          var now = Date.now();
+          var nextDue = 0;
+          for (var i = 0; i < lineKeys.length; i++) {
+            var entry = lines[lineKeys[i]];
+            if (!entry || entry.pending <= 0) continue;
+            var due = entry.lastSent + MIN_INTERVAL_MS;
+            if (now >= due) flushEntry(entry, now);
+            else if (!nextDue || due < nextDue) nextDue = due;
+          }
+          if (nextDue) schedule(Math.max(nextDue - now, 1));
+        } catch (e) { /* never throw from a timer */ }
+      }
+
+      function track(level, text, now) {
+        var key = level + '|' + text;
+        var entry = lines[key];
+        if (!entry) {
+          if (lineKeys.length >= MAX_TRACKED_LINES) {
+            var evictedKey = lineKeys.shift();
+            var evicted = lines[evictedKey];
+            delete lines[evictedKey];
+            if (evicted && evicted.pending > 0) flushEntry(evicted, now);
+          }
+          entry = lines[key] = { level: level, text: text, pending: 0, lastSent: 0 };
+          lineKeys.push(key);
+        }
+        entry.pending += 1;
+        if (now - entry.lastSent >= MIN_INTERVAL_MS) flushEntry(entry, now);
+        else schedule(entry.lastSent + MIN_INTERVAL_MS - now);
+      }
+
+      // `text` is a string, or a function returning one so the caller's
+      // serialization only runs once the raw ceiling has let the call through.
+      function postConsole(level, text) {
+        try {
+          var now = Date.now();
+          if (now - rawWindowStart >= 1000 || now < rawWindowStart) {
+            rawWindowStart = now;
+            rawCount = 0;
+          }
+          rawCount += 1;
+          if (rawCount > RAW_CEILING_PER_SECOND) {
+            droppedRaw += 1;
+            return;
+          }
+          var resolved = typeof text === 'function' ? text() : text;
+          if (typeof resolved !== 'string') resolved = String(resolved);
+          if (resolved.length > TEXT_MAX_LENGTH) resolved = resolved.slice(0, TEXT_MAX_LENGTH);
+          track(level, resolved, now);
+        } catch (e) { /* ignore serialization errors */ }
+      }
+
+      function serializeArgs(args) {
+        var parts = [];
+        var total = 0;
+        for (var i = 0; i < args.length; i++) {
+          var a = args[i];
+          var part = typeof a === 'string' ? a : JSON.stringify(a);
+          parts.push(part);
+          total += part ? part.length : 0;
+          if (total >= TEXT_MAX_LENGTH) break;
+        }
+        return parts.join(' ');
+      }
+
+      // 1. console.* (the original console behavior is kept intact)
+      function wrapConsole(level) {
+        var target = window.console;
+        var original = target && target[level];
+        if (typeof original !== 'function') return;
+        target[level] = function() {
+          var args = arguments;
+          postConsole(level, function() { return serializeArgs(args); });
+          return original.apply(target, arguments);
+        };
+      }
+      wrapConsole('log');
+      wrapConsole('warn');
+      wrapConsole('error');
+      wrapConsole('info');
+
+      // 2. Unhandled errors
+      window.addEventListener('error', function(e) {
+        postConsole('error', function() { return '[Runtime Error] ' + (e.message || String(e.error)); });
+      });
+
+      // 3. Unhandled promise rejections
+      window.addEventListener('unhandledrejection', function(e) {
+        postConsole('error', function() {
+          return '[Unhandled Promise] ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason));
+        });
+      });
+
+      // 4. Failed HTTP responses (4xx/5xx), with two post sites (try and fallback)
+      var _origFetch = window.fetch;
+      if (typeof _origFetch === 'function') {
+        window.fetch = function() {
+          var url = arguments[0];
+          var urlStr = typeof url === 'string' ? url : (url && url.url ? url.url : String(url));
+          return _origFetch.apply(this, arguments).then(function(response) {
+            if (!response.ok && response.status >= 400) {
+              var level = response.status >= 500 ? 'error' : 'warn';
+              var label = response.status >= 500 ? 'Server error' : 'Request failed';
+              try {
+                var path = new URL(urlStr, window.location.origin).pathname;
+                postConsole(level, '[HTTP ' + response.status + '] ' + label + ': ' + path);
+              } catch(e) {
+                postConsole(level, '[HTTP ' + response.status + '] ' + label + ': (unparseable URL)');
+              }
+            }
+            return response;
+          });
+        };
+      }
+    } catch (e) {
+      // Never let the console gate break the previewed app.
+    }
+  })();
 
   // Keep the parent's address bar current across SPA navigations.
   // Only wrap instance methods bound to history. Assigning onto

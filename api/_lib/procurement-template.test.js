@@ -7,6 +7,7 @@ import {
   applyTemplate,
   DEFAULT_JIRA_SUMMARY,
 } from "./procurement-template.js";
+import { jiraDescriptionToAdf } from "./jira-client.js";
 
 describe("procurement template", () => {
   it("omits notes when empty", () => {
@@ -59,6 +60,32 @@ describe("procurement template", () => {
       formatProcurementLinesBlock([]),
       "(no lines)",
     );
+  });
+
+  it("converts procurement URLs to clickable Jira links", () => {
+    const doc = jiraDescriptionToAdf(
+      "Link: https://example.com/item?sku=42. Order **2 units**",
+    );
+    assert.deepEqual(doc.content[0].content, [
+      { type: "text", text: "Link: " },
+      {
+        type: "text",
+        text: "https://example.com/item?sku=42",
+        marks: [
+          {
+            type: "link",
+            attrs: { href: "https://example.com/item?sku=42" },
+          },
+        ],
+      },
+      { type: "text", text: "." },
+      { type: "text", text: " Order " },
+      {
+        type: "text",
+        text: "2 units",
+        marks: [{ type: "strong" }],
+      },
+    ]);
   });
 
   it("applyTemplate leaves unknown keys empty", () => {

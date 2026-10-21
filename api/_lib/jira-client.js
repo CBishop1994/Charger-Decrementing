@@ -66,23 +66,47 @@ export function jiraDescriptionToAdf(value) {
   const inlineContent = (line) => {
     const content = [];
     const bold = /\*\*([^*]+)\*\*/g;
+    const appendText = (text, marks = []) => {
+      const urlPattern = /https?:\/\/[^\s<>"']+/gi;
+      let cursor = 0;
+      let urlMatch;
+
+      while ((urlMatch = urlPattern.exec(text))) {
+        const rawUrl = urlMatch[0];
+        const href = rawUrl.replace(/[.,!?;:]+$/, "");
+        if (!href) continue;
+        if (urlMatch.index > cursor) {
+          content.push({ type: "text", text: text.slice(cursor, urlMatch.index), ...(marks.length ? { marks } : {}) });
+        }
+        content.push({
+          type: "text",
+          text: href,
+          marks: [...marks, { type: "link", attrs: { href } }],
+        });
+        const punctuation = rawUrl.slice(href.length);
+        if (punctuation) {
+          content.push({ type: "text", text: punctuation, ...(marks.length ? { marks } : {}) });
+        }
+        cursor = urlMatch.index + rawUrl.length;
+      }
+
+      if (cursor < text.length) {
+        content.push({ type: "text", text: text.slice(cursor), ...(marks.length ? { marks } : {}) });
+      }
+    };
     let cursor = 0;
     let match;
 
     while ((match = bold.exec(line))) {
       if (match.index > cursor) {
-        content.push({ type: "text", text: line.slice(cursor, match.index) });
+        appendText(line.slice(cursor, match.index));
       }
-      content.push({
-        type: "text",
-        text: match[1],
-        marks: [{ type: "strong" }],
-      });
+      appendText(match[1], [{ type: "strong" }]);
       cursor = match.index + match[0].length;
     }
 
     if (cursor < line.length) {
-      content.push({ type: "text", text: line.slice(cursor) });
+      appendText(line.slice(cursor));
     }
     return content;
   };
