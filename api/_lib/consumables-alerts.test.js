@@ -295,15 +295,20 @@ describe("consumables alerts dry-run", () => {
     const { data: rows } = await supabaseAdmin
       .from("stock_orders")
       .select("*")
-      .eq("auto_restock_week_key", "2026-W41");
+      .ilike("note", "Auto-created from weekly consumables report 2026-W41%");
     assert.equal(rows.length, 1);
     assert.equal(rows[0].consumable_id, 11);
     assert.equal(rows[0].quantity_ordered, 5);
     assert.equal(rows[0].status, "ordered");
+    assert.match(rows[0].note, /^Auto-created from weekly consumables report 2026-W41/);
     assert.match(rows[0].note, /supplier purchase still needs to be placed manually/i);
+    assert.equal("auto_restock_week_key" in rows[0], false);
 
     const duplicate = await createAutoRestockOrders(items, "2026-W41", "WH-123");
     assert.deepEqual(duplicate, { count: 0, totalUnits: 0 });
+
+    const nextWeek = await createAutoRestockOrders(items, "2026-W42", "WH-124");
+    assert.deepEqual(nextWeek, { count: 1, totalUnits: 5 });
   });
 
   it("skips cron when weekly auto-run is disabled", async () => {

@@ -163,19 +163,24 @@ export function buildAutoRestockOrderRows(items, weekKey, issueKey, orderedAt = 
       received_by: "",
       ordered_at: orderedAt,
       delivered_at: null,
-      auto_restock_week_key: week,
     }));
 }
 
-/** Insert each auto-restock order at most once per item and Denver ISO week. */
+/**
+ * Deduplicate auto-restock orders using the report-week marker in the existing
+ * note column. This works with stock_orders schemas that predate the optional
+ * auto_restock_week_key column; unlike a unique index, the check is not atomic
+ * across simultaneous report runs.
+ */
 export async function createAutoRestockOrders(items, weekKey, issueKey) {
   const candidates = buildAutoRestockOrderRows(items, weekKey, issueKey);
   if (candidates.length === 0) return { count: 0, totalUnits: 0 };
 
+  const weekNotePrefix = `Auto-created from weekly consumables report ${String(weekKey)}`;
   const { data: existing, error: existingError } = await supabaseAdmin
     .from("stock_orders")
     .select("consumable_id")
-    .eq("auto_restock_week_key", String(weekKey));
+    .ilike("note", `${weekNotePrefix}%`);
   if (existingError) throw existingError;
 
   const existingIds = new Set((existing ?? []).map((row) => Number(row.consumable_id)));
@@ -195,7 +200,7 @@ export async function createAutoRestockOrders(items, weekKey, issueKey) {
     const { data: afterRace, error: lookupError } = await supabaseAdmin
       .from("stock_orders")
       .select("consumable_id")
-      .eq("auto_restock_week_key", String(weekKey));
+      .ilike("note", `${weekNotePrefix}%`);
     if (lookupError) throw lookupError;
     const afterRaceIds = new Set((afterRace ?? []).map((row) => Number(row.consumable_id)));
     if (pending.every((row) => afterRaceIds.has(row.consumable_id))) {
