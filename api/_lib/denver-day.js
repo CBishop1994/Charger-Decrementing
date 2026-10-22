@@ -4,8 +4,8 @@
  */
 
 export const PROCUREMENT_TZ = "America/Denver";
-/** 2:30pm MST as minutes from midnight (14*60+30). */
-export const CLOSE_MINUTES_MST = 0;
+/** Midnight boundary, retained as a named schedule constant. */
+
 
 /**
  * @param {Date} [date]
@@ -61,8 +61,8 @@ export function denverClockParts(date = new Date()) {
 }
 
 /**
- * Kept for compatibility; the current Denver calendar day remains open until the next midnight.
- * (Close schedule is defined as 2:30pm MST / 21:30 UTC.)
+ * Return the Denver weekday as Sunday=0 through Saturday=6.
+ *
  * @param {Date} [date]
  */
 export function denverWeekday(date = new Date()) {
@@ -104,7 +104,8 @@ export function procurementCloseDayKeyForCron(date = new Date()) {
   return previousDenverDayKey(date);
 }
 
-export function isPastProcurementClose(date = new Date()) {
+/** The current local date stays open until the next midnight close. */
+export function isPastProcurementClose(_date = new Date()) {
   return false;
 }
 

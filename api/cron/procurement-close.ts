@@ -1,13 +1,15 @@
 /**
- * Vercel Cron entrypoint — daily warehouse procurement close at 2:30pm MST.
+ * Vercel Cron entrypoint — close the prior weekday at midnight America/Denver.
  *
- * Schedule (vercel.json): "30 21 * * *"  →  21:30 UTC = 2:30pm MST (UTC−7).
+ * Vercel schedules are UTC: 06:00 during MDT and 07:00 during MST, Tuesday–Saturday.
+ * The local-time guard closes the preceding Monday–Friday date.
  *
  * Auth: Authorization: Bearer <CRON_SECRET>  (or ?secret= for manual curl).
  * Also accepts an approved admin session cookie for local testing.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runProcurementClose } from "../_lib/procurement-close.js";
+import { procurementCloseDayKeyForCron } from "../_lib/denver-day.js";
 import { requireApprovedUser } from "../_lib/require-auth.js";
 import { isDevAuthEnabled } from "../_lib/dev-auth.js";
 
@@ -56,8 +58,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       req.body && typeof req.body === "object"
         ? (req.body as Record<string, unknown>)
         : {};
+    const scheduledDayKey =
+      triggeredBy === "cron" ? procurementCloseDayKeyForCron() : null;
+    if (triggeredBy === "cron" && !scheduledDayKey) {
+      return res.status(200).json({
+        ok: true,
+        skipped: true,
+        reason: "outside_schedule_window",
+        schedule: "12:00 AM after weekdays (America/Denver)",
+      });
+    }
+
     const result = await runProcurementClose({
-      dayKey: body.day_key ? String(body.day_key) : undefined,
+      dayKey: scheduledDayKey ?? (body.day_key ? String(body.day_key) : undefined),
       dryRun: body.dry_run != null ? Boolean(body.dry_run) : undefined,
       triggeredBy,
     });

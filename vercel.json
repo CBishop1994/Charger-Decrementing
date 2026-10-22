@@ -2,12 +2,20 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/cron/procurement-close",
-      "schedule": "30 21 * * *"
+      "path": "/api/cron/consumables-alerts",
+      "schedule": "0 15 * * 5"
     },
     {
-      "path": "/api/cron/consumables-alerts",
-      "schedule": "0 15 * * 1"
+      "path": "/api/cron/consumables-alerts-mdt",
+      "schedule": "0 14 * * 5"
+    },
+    {
+      "path": "/api/cron/procurement-close",
+      "schedule": "0 7 * * 2-6"
+    },
+    {
+      "path": "/api/cron/procurement-close-mdt",
+      "schedule": "0 6 * * 2-6"
     }
   ],
   "rewrites": [

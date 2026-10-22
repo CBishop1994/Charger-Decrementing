@@ -21,8 +21,8 @@ import {
   consumablesAlertsScheduleLabelFromSettings,
   ensureConsumablesAlertSettings,
   normalizeApproachingRatio,
-  normalizeHourMst,
-  normalizeWeekday,
+
+
   resolveConsumablesAlertsRoutingFromSettings,
   serializeAlertSettings,
 } from "./consumables-alert-settings.js";
@@ -261,10 +261,10 @@ async function handleSettings(req, res, auth) {
         patch.include_good = Boolean(body.include_good);
       }
       if (body.schedule_weekday !== undefined) {
-        patch.schedule_weekday = normalizeWeekday(body.schedule_weekday, 1);
+        patch.schedule_weekday = 5;
       }
       if (body.schedule_hour_mst !== undefined) {
-        patch.schedule_hour_mst = normalizeHourMst(body.schedule_hour_mst, 8);
+        patch.schedule_hour_mst = 8;
       }
       if (body.slack_channel_id !== undefined) {
         patch.slack_channel_id = String(body.slack_channel_id ?? "").trim();

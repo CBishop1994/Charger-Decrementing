@@ -1,13 +1,15 @@
 /**
- * Vercel Cron entrypoint — weekly consumables inventory alerts at Monday 8:00am MST.
+ * Vercel Cron entrypoint — weekly consumables inventory alerts Friday at 8:00 AM America/Denver.
  *
- * Schedule (vercel.json): "0 15 * * 1"  →  15:00 UTC Mondays = 8:00am MST (UTC−7).
+ * Vercel schedules are UTC: 14:00 Fridays during MDT and 15:00 Fridays during MST.
+ * The local-time guard lets only the matching seasonal trigger run.
  *
  * Auth: Authorization: Bearer <CRON_SECRET>  (or ?secret= for manual curl).
  * Also accepts an approved admin session cookie for local testing.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runConsumablesWeeklyAlerts } from "../_lib/consumables-alerts.js";
+import { isDenverWallClockWindow } from "../_lib/denver-day.js";
 import { requireApprovedUser } from "../_lib/require-auth.js";
 import { isDevAuthEnabled } from "../_lib/dev-auth.js";
 
@@ -49,6 +51,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const auth = await requireApprovedUser(req, res, { requireAdmin: true });
     if (!auth) return;
     triggeredBy = `admin:${auth.email}`;
+  }
+
+  if (triggeredBy === "cron" && !isDenverWallClockWindow(new Date(), 5, 8)) {
+    return res.status(200).json({
+      ok: true,
+      skipped: true,
+      reason: "outside_schedule_window",
+      schedule: "Friday 8:00 AM America/Denver",
+    });
   }
 
   try {

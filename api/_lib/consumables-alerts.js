@@ -1,7 +1,7 @@
 /**
  * Weekly consumables inventory alerts.
  *
- * Trigger: Vercel Cron (Monday 8:00am MST by default) or admin "Run weekly report now".
+ * Trigger: Vercel Cron (Friday 8:00 AM America/Denver) or admin "Run weekly report now".
  * Creates one summary Jira ticket + Slack message with the ticket link.
  *
  * Stock status buckets (active items only), report order:
@@ -136,7 +136,7 @@ export function denverWeekKey(date = new Date()) {
 }
 
 export function consumablesAlertsScheduleLabel() {
-  return "Monday 8:00am MST (America/Denver)";
+  return "Friday 8:00 AM Mountain Time (America/Denver)";
 }
 
 /**
@@ -144,6 +144,74 @@ export function consumablesAlertsScheduleLabel() {
  */
 export function resolveConsumablesAlertsRouting() {
   return resolveConsumablesAlertsRoutingFromSettings({});
+}
+
+/** Build internal stock-order rows for positive restock quantities. */
+export function buildAutoRestockOrderRows(items, weekKey, issueKey, orderedAt = new Date().toISOString()) {
+  const week = String(weekKey ?? "").trim();
+  const issue = String(issueKey ?? "").trim();
+  if (!week) return [];
+  return items
+    .filter((item) => Number(item?.id) > 0 && Math.trunc(Number(item?.qty_to_order) || 0) > 0)
+    .map((item) => ({
+      consumable_id: Math.trunc(Number(item.id)),
+      quantity_ordered: Math.trunc(Number(item.qty_to_order)),
+      quantity_received: null,
+      status: "ordered",
+      note: `Auto-created from weekly consumables report ${week}${issue ? ` · Jira ${issue}` : ""}; supplier purchase still needs to be placed manually.`,
+      ordered_by: "Weekly consumables automation",
+      received_by: "",
+      ordered_at: orderedAt,
+      delivered_at: null,
+      auto_restock_week_key: week,
+    }));
+}
+
+/** Insert each auto-restock order at most once per item and Denver ISO week. */
+export async function createAutoRestockOrders(items, weekKey, issueKey) {
+  const candidates = buildAutoRestockOrderRows(items, weekKey, issueKey);
+  if (candidates.length === 0) return { count: 0, totalUnits: 0 };
+
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from("stock_orders")
+    .select("consumable_id")
+    .eq("auto_restock_week_key", String(weekKey));
+  if (existingError) throw existingError;
+
+  const existingIds = new Set((existing ?? []).map((row) => Number(row.consumable_id)));
+  const pending = candidates.filter((row) => !existingIds.has(row.consumable_id));
+  if (pending.length === 0) return { count: 0, totalUnits: 0 };
+
+  const { data: inserted, error: insertError } = await supabaseAdmin
+    .from("stock_orders")
+    .insert(pending)
+    .select("consumable_id,quantity_ordered");
+  if (insertError) {
+    const duplicate =
+      String(insertError.code ?? "") === "23505" ||
+      /duplicate key|unique constraint/i.test(String(insertError.message ?? ""));
+    if (!duplicate) throw insertError;
+
+    const { data: afterRace, error: lookupError } = await supabaseAdmin
+      .from("stock_orders")
+      .select("consumable_id")
+      .eq("auto_restock_week_key", String(weekKey));
+    if (lookupError) throw lookupError;
+    const afterRaceIds = new Set((afterRace ?? []).map((row) => Number(row.consumable_id)));
+    if (pending.every((row) => afterRaceIds.has(row.consumable_id))) {
+      return { count: 0, totalUnits: 0 };
+    }
+    throw insertError;
+  }
+
+  const rows = inserted ?? [];
+  return {
+    count: rows.length,
+    totalUnits: rows.reduce(
+      (sum, row) => sum + Math.trunc(Number(row.quantity_ordered) || 0),
+      0,
+    ),
+  };
 }
 
 /**
@@ -177,7 +245,6 @@ export function buildConsumablesReport(items, opts = {}) {
       id: Number(item?.id) || 0,
       name: String(item?.name ?? "Item"),
       sku: String(item?.sku ?? ""),
-      mpn: String(item?.mpn ?? ""),
       mpn: String(item?.mpn ?? ""),
       quantity: qty,
       min_level: min,
@@ -599,6 +666,11 @@ export async function runConsumablesWeeklyAlerts(opts = {}) {
     dryRun,
   });
 
+  const autoRestockOrders =
+    dryRun || issue.dryRun
+      ? { count: 0, totalUnits: 0 }
+      : await createAutoRestockOrders(report.items, weekKey, issue.key);
+
   const slackText = buildConsumablesAlertsSlackText({
     weekKey,
     issueKey: issue.key,
@@ -645,6 +717,7 @@ export async function runConsumablesWeeklyAlerts(opts = {}) {
     batch,
     issue,
     slack,
+    autoRestockOrders,
     counts: report.counts,
     report,
     ticket,

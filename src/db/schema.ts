@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, real, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, real, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const consumables = pgTable("consumables", {
   id: serial("id").primaryKey(),
@@ -30,19 +30,28 @@ export const stock_transactions = pgTable("stock_transactions", {
   created_at: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const stock_orders = pgTable("stock_orders", {
-  id: serial("id").primaryKey(),
-  consumable_id: integer("consumable_id").notNull(),
-  quantity_ordered: integer("quantity_ordered").notNull(),
-  quantity_received: integer("quantity_received"),
-  status: text("status").notNull(),
-  note: text("note").notNull(),
-  ordered_by: text("ordered_by").notNull(),
-  received_by: text("received_by").notNull(),
-  ordered_at: text("ordered_at"),
-  delivered_at: text("delivered_at"),
-  created_at: timestamp("created_at").defaultNow().notNull(),
-});
+export const stock_orders = pgTable(
+  "stock_orders",
+  {
+    id: serial("id").primaryKey(),
+    consumable_id: integer("consumable_id").notNull(),
+    quantity_ordered: integer("quantity_ordered").notNull(),
+    quantity_received: integer("quantity_received"),
+    status: text("status").notNull(),
+    note: text("note").notNull(),
+    ordered_by: text("ordered_by").notNull(),
+    received_by: text("received_by").notNull(),
+    ordered_at: text("ordered_at"),
+    delivered_at: text("delivered_at"),
+    auto_restock_week_key: text("auto_restock_week_key"),
+    created_at: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    autoRestockPerItemWeek: uniqueIndex(
+      "stock_orders_auto_restock_item_week_uidx",
+    ).on(table.consumable_id, table.auto_restock_week_key),
+  }),
+);
 
 export const bin_locations = pgTable("bin_locations", {
   id: serial("id").primaryKey(),

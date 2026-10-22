@@ -128,6 +128,7 @@ export type StockOrder = {
   received_by: string;
   ordered_at: string | null;
   delivered_at: string | null;
+  auto_restock_week_key?: string | null;
   created_at: string | null;
   /** Populated on list/dashboard responses when available. */
   consumable_name?: string;

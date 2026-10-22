@@ -4,7 +4,10 @@ import {
   denverDayKey,
   nextDenverDayKey,
   isPastProcurementClose,
-  CLOSE_MINUTES_MST,
+  previousDenverDayKey,
+  denverWeekday,
+  isDenverWallClockWindow,
+  procurementCloseDayKeyForCron,
 } from "./denver-day.js";
 
 describe("denver day helpers", () => {
@@ -21,10 +24,26 @@ describe("denver day helpers", () => {
     assert.equal(fromDate, nextDenverDayKey(denverDayKey(new Date("2026-10-05T18:00:00Z"))));
   });
 
-  it("detects before/after 2:30pm Denver close", () => {
-    // 14:00 Denver during MDT = 20:00 UTC; during MST = 21:00 UTC.
-    // Use a fixed instant and compare against minutesOfDay via known bounds.
-    assert.equal(typeof isPastProcurementClose(new Date()), "boolean");
-    assert.equal(CLOSE_MINUTES_MST, 14 * 60 + 30);
+  it("handles Denver wall-clock schedules across DST and weekday rollover", () => {
+    // Vercel triggers use both UTC offsets to preserve Denver wall-clock time.
+    // The fixed 8:00 AM and midnight windows are validated below.
+    assert.equal(isPastProcurementClose(new Date("2026-10-05T23:00:00Z")), false);
+    const winterFridayEight = new Date("2026-01-09T15:30:00Z");
+    const summerFridayEight = new Date("2026-07-10T14:30:00Z");
+    assert.equal(denverWeekday(winterFridayEight), 5);
+    assert.equal(isDenverWallClockWindow(winterFridayEight, 5, 8), true);
+    assert.equal(isDenverWallClockWindow(summerFridayEight, 5, 8), true);
+    assert.equal(
+      isDenverWallClockWindow(new Date("2026-07-10T15:30:00Z"), 5, 8),
+      false,
+    );
+
+    const winterTuesdayMidnight = new Date("2026-01-06T07:30:00Z");
+    const summerTuesdayMidnight = new Date("2026-07-07T06:30:00Z");
+    assert.equal(procurementCloseDayKeyForCron(winterTuesdayMidnight), "2026-01-05");
+    assert.equal(procurementCloseDayKeyForCron(summerTuesdayMidnight), "2026-07-06");
+    assert.equal(previousDenverDayKey(summerTuesdayMidnight), "2026-07-06");
+    assert.equal(procurementCloseDayKeyForCron(new Date("2026-07-07T07:30:00Z")), null);
+    assert.equal(procurementCloseDayKeyForCron(new Date("2026-07-06T06:30:00Z")), null);
   });
 });

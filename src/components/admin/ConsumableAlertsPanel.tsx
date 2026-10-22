@@ -218,8 +218,8 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
     setIncBelow(s.include_below_minimum !== false);
     setIncApproach(s.include_approaching !== false);
 
-    setWeekday(String(s.schedule_weekday ?? 1));
-    setHour(String(s.schedule_hour_mst ?? 8));
+    setWeekday("5");
+    setHour("8");
     setSlackChannel(s.slack_channel_id ?? "");
     setSlackPing(s.slack_ping_user_id ?? "");
     setJiraProject(s.jira_project_key ?? "");
@@ -709,8 +709,8 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
                   </label>
                 </div>
                 <div className="space-y-2">
-                  <Label>Schedule day (MST)</Label>
-                  <Select value={weekday} onValueChange={setWeekday}>
+                  <Label>Schedule day (America/Denver)</Label>
+                  <Select value={weekday} onValueChange={setWeekday} disabled>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Weekday" />
                     </SelectTrigger>
@@ -724,8 +724,8 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Schedule hour (MST)</Label>
-                  <Select value={hour} onValueChange={setHour}>
+                  <Label>Schedule hour (America/Denver)</Label>
+                  <Select value={hour} onValueChange={setHour} disabled>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Hour" />
                     </SelectTrigger>
@@ -741,6 +741,9 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
               </div>
 
               <div>
+                <p className="mb-1 text-xs text-muted-foreground">
+                  Fixed schedule: Fridays at 8:00 AM Mountain Time (America/Denver), including daylight-saving changes.
+                </p>
                 <p className="mb-2 text-sm font-medium">Report sections</p>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {(

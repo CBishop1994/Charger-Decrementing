@@ -66,16 +66,10 @@ function currentDenverWeekKey(date = new Date()) {
   return `${day.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-function localClosePassed(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Denver",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const hour = Number(parts.find((item) => item.type === "hour")?.value ?? 0);
-  const minute = Number(parts.find((item) => item.type === "minute")?.value ?? 0);
-  return hour > 14 || (hour === 14 && minute >= 30);
+function localClosePassed(_date = new Date()) {
+  // Midnight closes the previous Denver date; new lines always belong to the
+  // current local date and remain open until that date's next midnight close.
+  return false;
 }
 
 function rowFromBody(init?: RequestInit): Row {
@@ -354,7 +348,7 @@ async function procurementRoute(method: string, parts: string[], body: Row) {
     const history = batches;
     const locked = Boolean(batch) || closePassed;
     const lines = queueDay === dayKey ? todayLines : queueLines;
-    return { day_key: dayKey, queue_day_key: queueDay, past_close: closePassed, close_schedule: "2:30pm America/Denver", locked, batch, history, open_count: lines.filter((line) => line.status === "open").length, submitted_count: lines.filter((line) => line.status === "submitted").length, integrations: { jira: { configured: false, missing: ["server integration unavailable in local storage"], dryRun: true }, slack: { configured: false, missing: ["server integration unavailable in local storage"], dryRun: true }, dry_run: true, dry_run_reason: "PGlite local mode stores records in this browser and does not submit to Jira or Slack.", mode: "dry-run" } };
+    return { day_key: dayKey, queue_day_key: queueDay, past_close: closePassed, close_schedule: "12:00 AM after weekdays (America/Denver)", locked, batch, history, open_count: lines.filter((line) => line.status === "open").length, submitted_count: lines.filter((line) => line.status === "submitted").length, integrations: { jira: { configured: false, missing: ["server integration unavailable in local storage"], dryRun: true }, slack: { configured: false, missing: ["server integration unavailable in local storage"], dryRun: true }, dry_run: true, dry_run_reason: "PGlite local mode stores records in this browser and does not submit to Jira or Slack.", mode: "dry-run" } };
   }
   if (action === "settings") {
     const current = (await db.select().from(schema.procurement_settings).limit(1))[0];
@@ -410,7 +404,7 @@ async function alertSettingsRoute(method: string, parts: string[], body: Row) {
       for (const key of ["approaching_ratio", "schedule_weekday", "schedule_hour_mst"] as const) if (body[key] !== undefined) patch[key] = numeric(body[key]);
       for (const key of ["weekly_enabled", "include_out_of_stock", "include_below_minimum", "include_approaching", "include_good"] as const) if (body[key] !== undefined) patch[key] = Boolean(body[key]);
       for (const key of ["slack_channel_id", "slack_ping_user_id", "jira_project_key", "jira_issue_type", "jira_summary_template", "jira_intro_template", "jira_section_heading_template", "jira_item_line_template", "jira_empty_section_template", "jira_footer_template", "jira_description_template"] as const) if (body[key] !== undefined) patch[key] = text(body[key]);
-      const values = { approaching_ratio: numeric(body.approaching_ratio, 1.25), weekly_enabled: body.weekly_enabled !== false, include_out_of_stock: body.include_out_of_stock !== false, include_below_minimum: body.include_below_minimum !== false, include_approaching: body.include_approaching !== false, include_good: body.include_good !== false, schedule_weekday: Math.max(1, numeric(body.schedule_weekday, 1)), schedule_hour_mst: numeric(body.schedule_hour_mst, 8), slack_channel_id: text(body.slack_channel_id), slack_ping_user_id: text(body.slack_ping_user_id), jira_project_key: text(body.jira_project_key), jira_issue_type: text(body.jira_issue_type), jira_summary_template: text(body.jira_summary_template, "Consumables weekly inventory {{week}}"), jira_intro_template: text(body.jira_intro_template, "Summary: {{out_count}} out · {{below_count}} below · {{approaching_count}} approaching"), jira_section_heading_template: text(body.jira_section_heading_template, "## {{title}} ({{count}})"), jira_item_line_template: text(body.jira_item_line_template, "- {{name}}: {{qty}} {{unit}} on hand"), jira_empty_section_template: text(body.jira_empty_section_template, "(none)"), jira_footer_template: text(body.jira_footer_template, "Order total: {{order_total}} units"), jira_description_template: text(body.jira_description_template, "{{intro}}\n\n{{sections}}\n\n{{footer}}"), updated_by: text(body.updated_by, "local operator"), updated_at: now() };
+      const values = { approaching_ratio: numeric(body.approaching_ratio, 1.25), weekly_enabled: body.weekly_enabled !== false, include_out_of_stock: body.include_out_of_stock !== false, include_below_minimum: body.include_below_minimum !== false, include_approaching: body.include_approaching !== false, include_good: body.include_good !== false, schedule_weekday: 5, schedule_hour_mst: numeric(body.schedule_hour_mst, 8), slack_channel_id: text(body.slack_channel_id), slack_ping_user_id: text(body.slack_ping_user_id), jira_project_key: text(body.jira_project_key), jira_issue_type: text(body.jira_issue_type), jira_summary_template: text(body.jira_summary_template, "Consumables weekly inventory {{week}}"), jira_intro_template: text(body.jira_intro_template, "Summary: {{out_count}} out · {{below_count}} below · {{approaching_count}} approaching"), jira_section_heading_template: text(body.jira_section_heading_template, "## {{title}} ({{count}})"), jira_item_line_template: text(body.jira_item_line_template, "- {{name}}: {{qty}} {{unit}} on hand"), jira_empty_section_template: text(body.jira_empty_section_template, "(none)"), jira_footer_template: text(body.jira_footer_template, "Order total: {{order_total}} units"), jira_description_template: text(body.jira_description_template, "{{intro}}\n\n{{sections}}\n\n{{footer}}"), updated_by: text(body.updated_by, "local operator"), updated_at: now() };
       const row = current ? (await db.update(schema.consumables_alert_settings).set(patch).where(eq(schema.consumables_alert_settings.id, current.id)).returning())[0] : (await db.insert(schema.consumables_alert_settings).values(values).returning())[0];
       return normalize(row);
     }
@@ -425,7 +419,7 @@ async function alertSettingsRoute(method: string, parts: string[], body: Row) {
     });
     const counts = { out_of_stock: categorized.filter((r) => r.status === "out_of_stock").length, below_minimum: categorized.filter((r) => r.status === "below_minimum").length, approaching: categorized.filter((r) => r.status === "approaching").length, good: categorized.filter((r) => r.status === "good").length, total: categorized.length };
     const batches = normalize(await db.select().from(schema.consumables_alert_batches).orderBy(desc(schema.consumables_alert_batches.created_at)).limit(20));
-    return { week_key: currentDenverWeekKey(), day_key: dateKeyInDenver(), schedule: "Monday 8:00 AM America/Denver", locked: false, batch: batches.find((row: Row) => row.week_key === currentDenverWeekKey()) ?? null, history: batches, counts: { ...counts, units_to_order: categorized.reduce((sum, item) => sum + item.qty_to_order, 0), skus_to_order: categorized.filter((item) => item.qty_to_order > 0).length }, items: categorized, settings: config, integrations: { jira: { configured: false, missing: ["local PGlite mode"], dryRun: true }, slack: { configured: false, missing: ["local PGlite mode"], dryRun: true }, dry_run: true, dry_run_reason: "Local storage cannot submit external Jira or Slack actions.", mode: "dry-run" } };
+    return { week_key: currentDenverWeekKey(), day_key: dateKeyInDenver(), schedule: "Friday 8:00 AM America/Denver", locked: false, batch: batches.find((row: Row) => row.week_key === currentDenverWeekKey()) ?? null, history: batches, counts: { ...counts, units_to_order: categorized.reduce((sum, item) => sum + item.qty_to_order, 0), skus_to_order: categorized.filter((item) => item.qty_to_order > 0).length }, items: categorized, settings: config, integrations: { jira: { configured: false, missing: ["local PGlite mode"], dryRun: true }, slack: { configured: false, missing: ["local PGlite mode"], dryRun: true }, dry_run: true, dry_run_reason: "Local storage cannot submit external Jira or Slack actions.", mode: "dry-run" } };
   }
   if (parts[1] === "run" && method === "POST") return runAlertsLocally();
   fail("Method not allowed", 405);

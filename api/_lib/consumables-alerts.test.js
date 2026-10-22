@@ -23,6 +23,7 @@ const {
   renderConsumablesAlertTicket,
   denverWeekKey,
   runConsumablesWeeklyAlerts,
+  createAutoRestockOrders,
 } = await import("./consumables-alerts.js");
 const { supabaseAdmin } = await import("./supabase-admin.js");
 const { jiraDescriptionToAdf } = await import("./jira-client.js");
@@ -279,6 +280,30 @@ describe("consumables stock classification", () => {
 describe("consumables alerts dry-run", () => {
   before(() => {
     resetLocalMemoryDb();
+  });
+
+  it("creates internal restock orders once per item and report week", async () => {
+    resetLocalMemoryDb();
+    const items = [
+      { id: 11, name: "Widget", qty_to_order: 5 },
+      { id: 12, name: "No restock needed", qty_to_order: 0 },
+    ];
+
+    const created = await createAutoRestockOrders(items, "2026-W41", "WH-123");
+    assert.deepEqual(created, { count: 1, totalUnits: 5 });
+
+    const { data: rows } = await supabaseAdmin
+      .from("stock_orders")
+      .select("*")
+      .eq("auto_restock_week_key", "2026-W41");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].consumable_id, 11);
+    assert.equal(rows[0].quantity_ordered, 5);
+    assert.equal(rows[0].status, "ordered");
+    assert.match(rows[0].note, /supplier purchase still needs to be placed manually/i);
+
+    const duplicate = await createAutoRestockOrders(items, "2026-W41", "WH-123");
+    assert.deepEqual(duplicate, { count: 0, totalUnits: 0 });
   });
 
   it("skips cron when weekly auto-run is disabled", async () => {
