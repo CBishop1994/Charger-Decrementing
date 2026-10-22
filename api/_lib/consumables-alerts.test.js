@@ -126,6 +126,41 @@ describe("consumables stock classification", () => {
     assert.equal(ticket.description.toLowerCase().includes("1 good"), false);
   });
 
+  it("excludes good-status stock from the Jira order total", () => {
+    const report = buildConsumablesReport([
+      { name: "Apple 140w Charger Block", quantity: 0, min_level: 20 },
+      { name: "Amazon USB-C Cable", quantity: 12, min_level: 30 },
+      { name: "Anker USB-C Hub", quantity: 16, min_level: 25 },
+      { name: "Apple Magsafe Cable", quantity: 73, min_level: 75 },
+      {
+        name: "Lenovo Charger",
+        quantity: 17,
+        min_level: 30,
+        quantity_on_order: 24,
+      },
+      { name: "Apple 96w Charger Block", quantity: 80, min_level: 75 },
+      // This previously added 202 hidden units to the summary (490 vs 288).
+      { name: "Hidden good stock", quantity: 398, min_level: 300 },
+    ]);
+
+    assert.equal(report.counts.out_of_stock, 1);
+    assert.equal(report.counts.below_minimum, 4);
+    assert.equal(report.counts.approaching, 1);
+    assert.equal(report.counts.good, 1);
+    assert.equal(report.counts.units_to_order, 288);
+    assert.equal(report.counts.skus_to_order, 6);
+    assert.equal(
+      report.items.find((item) => item.name === "Hidden good stock").qty_to_order,
+      0,
+    );
+
+    const ticket = renderConsumablesAlertTicket({ weekKey: "2026-W41", report });
+    assert.match(ticket.description, /6 items requiring attention/);
+    assert.match(ticket.description, /\*\*order 288 units\*\*/);
+    assert.match(ticket.description, /Total additional quantity to order now: \*\*288 units\*\*/);
+    assert.equal(ticket.description.includes("Hidden good stock"), false);
+  });
+
   it("updates saved built-in Jira templates while preserving custom templates", () => {
     const settings = serializeAlertSettings({
       include_good: true,

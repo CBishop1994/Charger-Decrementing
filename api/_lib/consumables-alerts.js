@@ -245,7 +245,9 @@ export function buildConsumablesReport(items, opts = {}) {
     const min = Math.max(0, Number(item?.min_level) || 0);
     const target = restockTargetQty(min);
     const onOrder = Math.max(0, Math.trunc(Number(item?.quantity_on_order) || 0));
-    const orderQty = qtyToOrder(qty, min, onOrder);
+    // The min × 2 target is only actionable for items in an attention bucket.
+    // Good-status stock can be below that target without needing replenishment.
+    const orderQty = status === "good" ? 0 : qtyToOrder(qty, min, onOrder);
     const row = {
       id: Number(item?.id) || 0,
       name: String(item?.name ?? "Item"),
