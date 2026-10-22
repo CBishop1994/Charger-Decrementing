@@ -158,7 +158,11 @@ async function resolveNamedCreateFields(cfg, fields) {
   };
 
   const typeData = await getJson(`${root}?maxResults=100`, "issue type metadata");
-  const issueTypes = Array.isArray(typeData.values) ? typeData.values : [];
+  const issueTypes = Array.isArray(typeData.issueTypes)
+    ? typeData.issueTypes
+    : Array.isArray(typeData.values)
+      ? typeData.values
+      : [];
   const issueType = issueTypes.find((item) => String(item.name).toLowerCase() === cfg.issueType.toLowerCase());
   if (!issueType?.id) {
     throw new Error(`Jira issue type metadata did not include \"${cfg.issueType}\" for project ${cfg.projectKey}`);

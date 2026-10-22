@@ -30,7 +30,7 @@ describe("Jira named required create fields", () => {
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url);
       if (target.includes("/issuetypes?") && options.method === "GET") {
-        return Response.json({ values: [{ id: "10001", name: "Task" }] });
+        return Response.json({ issueTypes: [{ id: "10001", name: "Task" }] });
       }
       if (target.endsWith("/issuetypes/10001?maxResults=100")) {
         return Response.json({ fields: {
@@ -68,7 +68,7 @@ describe("Jira named required create fields", () => {
   it("reports Jira's available choices when a configured value is absent", async () => {
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url);
-      if (target.includes("/issuetypes?") && options.method === "GET") return Response.json({ values: [{ id: "10001", name: "Task" }] });
+      if (target.includes("/issuetypes?") && options.method === "GET") return Response.json({ issueTypes: [{ id: "10001", name: "Task" }] });
       if (target.endsWith("/issuetypes/10001?maxResults=100")) {
         return Response.json({ fields: {
           customfield_10100: { name: "Service & Issues", schema: { type: "option" }, allowedValues: [{ id: "200", value: "Catalog / Stock Issue" }] },
