@@ -363,7 +363,20 @@ async function handleRun(req, res, auth) {
     });
     return res.status(200).json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    console.error("[consumables-alerts/run] failed", err);
+    let message;
+    if (err instanceof Error) {
+      message = err.message;
+    } else if (typeof err === "string") {
+      message = err;
+    } else if (err && typeof err === "object") {
+      const details = err;
+      message = [details.message, details.error, details.details, details.hint]
+        .find((value) => typeof value === "string" && value.trim())
+        || JSON.stringify(details);
+    } else {
+      message = String(err ?? "Unknown error");
+    }
     return res.status(500).json({ error: message, code: "ALERTS_FAILED" });
   }
 }
