@@ -200,7 +200,7 @@ export function ConsumableAlertsPanel({ onToast }: { onToast: ToastFn }) {
   const [incBelow, setIncBelow] = useState(true);
   const [incApproach, setIncApproach] = useState(true);
 
-  const [weekday, setWeekday] = useState("1");
+  const [weekday, setWeekday] = useState("5");
   const [hour, setHour] = useState("8");
   const [slackChannel, setSlackChannel] = useState("");
   const [slackPing, setSlackPing] = useState("");

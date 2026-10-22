@@ -46,7 +46,7 @@ export const DEFAULT_ALERT_SETTINGS = {
   include_below_minimum: true,
   include_approaching: true,
   include_good: false,
-  schedule_weekday: 1,
+  schedule_weekday: 5,
   schedule_hour_mst: 8,
   slack_channel_id: "",
   slack_ping_user_id: "",
@@ -196,7 +196,7 @@ export function consumablesAlertsScheduleLabelFromSettings(settings) {
     settings?.weekly_enabled == null
       ? true
       : Boolean(settings.weekly_enabled);
-  const base = `${name} ${ampm}:00${suffix} MST (America/Denver)`;
+  const base = `${name} ${ampm}:00${suffix} Mountain Time (America/Denver)`;
   return enabled ? base : `${base} · auto-run off`;
 }
 
@@ -231,8 +231,8 @@ export function serializeAlertSettings(row) {
         ? true
         : Boolean(row.include_approaching),
     include_good: false,
-    schedule_weekday: normalizeWeekday(row?.schedule_weekday, 1),
-    schedule_hour_mst: normalizeHourMst(row?.schedule_hour_mst, 8),
+    schedule_weekday: 5,
+    schedule_hour_mst: 8,
     slack_channel_id: String(row?.slack_channel_id ?? ""),
     slack_ping_user_id: String(row?.slack_ping_user_id ?? ""),
     jira_project_key: String(row?.jira_project_key ?? ""),
