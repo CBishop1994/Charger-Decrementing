@@ -11,8 +11,8 @@
     "preview": "vite preview",
     "test:procurement": "node --test api/_lib/procurement-template.test.js api/_lib/denver-day.test.js api/_lib/procurement-close.test.js api/_lib/integration-dry-run.test.js",
     "test:alerts": "node --test api/_lib/consumables-alerts.test.js",
-    "test:integrations": "node --test api/_lib/integration-dry-run.test.js api/_lib/integration-test.test.js",
-    "test:api": "node --test api/_lib/procurement-template.test.js api/_lib/denver-day.test.js api/_lib/procurement-close.test.js api/_lib/consumables-alerts.test.js api/_lib/integration-dry-run.test.js api/_lib/integration-test.test.js"
+    "test:integrations": "node --test api/_lib/integration-dry-run.test.js api/_lib/integration-test.test.js api/_lib/jira-client.test.js",
+    "test:api": "node --test api/_lib/procurement-template.test.js api/_lib/denver-day.test.js api/_lib/procurement-close.test.js api/_lib/consumables-alerts.test.js api/_lib/integration-dry-run.test.js api/_lib/integration-test.test.js api/_lib/jira-client.test.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.17",

@@ -131,7 +131,62 @@ export function jiraDescriptionToAdf(value) {
 }
 
 /**
- * @param {{ summary: string, description: string, projectKey?: string, issueType?: string, dryRun?: boolean }} input
+ * Resolve named Jira create fields to their internal field IDs and option IDs.
+ * This avoids hard-coding customfield_NNNNN values, which differ by Jira site.
+ * @param {object} cfg
+ * @param {Record<string, string>} fields display name -> desired option/text
+ */
+async function resolveNamedCreateFields(cfg, fields) {
+  const auth = Buffer.from(`${cfg.email}:${cfg.apiToken}`).toString("base64");
+  const headers = { Authorization: `Basic ${auth}`, Accept: "application/json" };
+  const root = `${cfg.baseUrl}/rest/api/3/issue/createmeta/${encodeURIComponent(cfg.projectKey)}/issuetypes`;
+  const getJson = async (url, label) => {
+    const res = await fetch(url, { method: "GET", headers });
+    const text = await res.text();
+    let data;
+    try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+    if (!res.ok) {
+      throw new Error(`Jira ${label} lookup failed (${res.status}): ${data?.errorMessages?.join?.("; ") || text || res.statusText}`);
+    }
+    return data;
+  };
+
+  const typeData = await getJson(`${root}?maxResults=100`, "issue type metadata");
+  const issueTypes = Array.isArray(typeData.values) ? typeData.values : [];
+  const issueType = issueTypes.find((item) => String(item.name).toLowerCase() === cfg.issueType.toLowerCase());
+  if (!issueType?.id) {
+    throw new Error(`Jira issue type metadata did not include \"${cfg.issueType}\" for project ${cfg.projectKey}`);
+  }
+
+  const fieldsData = await getJson(`${root}/${encodeURIComponent(issueType.id)}?maxResults=100`, "create field metadata");
+  const fieldMap = fieldsData.fields && !Array.isArray(fieldsData.fields)
+    ? fieldsData.fields
+    : Object.fromEntries((fieldsData.values || []).map((field) => [field.fieldId || field.id, field]));
+  const resolved = {};
+
+  for (const [displayName, desired] of Object.entries(fields)) {
+    const entry = Object.entries(fieldMap).find(([, field]) => String(field.name || "").trim().toLowerCase() === displayName.toLowerCase());
+    if (!entry) throw new Error(`Required Jira field \"${displayName}\" was not found in create metadata for ${cfg.projectKey} / ${cfg.issueType}`);
+    const [fieldId, field] = entry;
+    const options = Array.isArray(field.allowedValues) ? field.allowedValues : [];
+    if (options.length) {
+      const option = options.find((item) => [item.value, item.name, item.label].some((value) => String(value ?? "").trim().toLowerCase() === desired.trim().toLowerCase()));
+      if (!option?.id) {
+        const choices = options.map((item) => item.value || item.name || item.label).filter(Boolean).join(", ");
+        throw new Error(`Jira field \"${displayName}\" has no option \"${desired}\". Available options: ${choices || "(none returned)"}`);
+      }
+      resolved[fieldId] = field.schema?.type === "array" ? [{ id: String(option.id) }] : { id: String(option.id) };
+    } else if (field.schema?.type === "string" || !field.schema?.type) {
+      resolved[fieldId] = desired;
+    } else {
+      throw new Error(`Jira field \"${displayName}\" has no option metadata to resolve \"${desired}\"`);
+    }
+  }
+  return resolved;
+}
+
+/**
+ * @param {{ summary: string, description: string, projectKey?: string, issueType?: string, dryRun?: boolean, requiredFields?: Record<string, string> }} input
  * @returns {Promise<{ key: string, id: string, self: string, url: string, dryRun: boolean }>}
  */
 export async function createJiraIssue(input) {
@@ -169,8 +224,12 @@ export async function createJiraIssue(input) {
   const endpoint = `${cfg.baseUrl}/rest/api/3/issue`;
 
   // ADF description keeps Cloud API happy; plain text also accepted via doc node.
+  const requiredFields = input.requiredFields && Object.keys(input.requiredFields).length
+    ? await resolveNamedCreateFields(cfg, input.requiredFields)
+    : {};
   const body = {
     fields: {
+      ...requiredFields,
       project: { key: cfg.projectKey },
       summary: String(input.summary ?? "").slice(0, 255),
       issuetype: { name: cfg.issueType },

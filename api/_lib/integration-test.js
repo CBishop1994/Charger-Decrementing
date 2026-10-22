@@ -243,6 +243,11 @@ export async function runIntegrationTests(opts = {}) {
             description:
               "Automated integration test from the Consumables admin dashboard.\n" +
               "Safe to close/delete — confirms API token can create issues.",
+            requiredFields: {
+              "Service & Issues": "Catalog / Stock Issue",
+              GEO: "US",
+              Customer: "Firstbase",
+            },
             dryRun: false,
           });
         }
