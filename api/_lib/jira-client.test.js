@@ -33,11 +33,11 @@ describe("Jira named required create fields", () => {
         return Response.json({ issueTypes: [{ id: "10001", name: "Task" }] });
       }
       if (target.endsWith("/issuetypes/10001?maxResults=100")) {
-        return Response.json({ fields: {
-          customfield_10101: { name: "Service & Issues", schema: { type: "option" }, allowedValues: [{ id: "201", value: "Catalog / Stock Issue" }] },
-          customfield_10102: { name: "GEO", schema: { type: "option" }, allowedValues: [{ id: "202", value: "US" }] },
-          customfield_10103: { name: "Customer", schema: { type: "option" }, allowedValues: [{ id: "203", value: "Firstbase" }] },
-        } });
+        return Response.json({ fields: [
+          { fieldId: "customfield_10101", name: "Service & Issues", schema: { type: "option" }, allowedValues: [{ id: "201", value: "Catalog / Stock Issue" }] },
+          { fieldId: "customfield_10102", name: "GEO", schema: { type: "option" }, allowedValues: [{ id: "202", value: "US" }] },
+          { fieldId: "customfield_10103", name: "Customer", schema: { type: "option" }, allowedValues: [{ id: "203", value: "Firstbase" }] },
+        ] });
       }
       if (target.endsWith("/rest/api/3/issue") && options.method === "POST") {
         createPayload = JSON.parse(options.body);

@@ -169,9 +169,18 @@ async function resolveNamedCreateFields(cfg, fields) {
   }
 
   const fieldsData = await getJson(`${root}/${encodeURIComponent(issueType.id)}?maxResults=100`, "create field metadata");
-  const fieldMap = fieldsData.fields && !Array.isArray(fieldsData.fields)
+  const metadataFields = Array.isArray(fieldsData.fields)
     ? fieldsData.fields
-    : Object.fromEntries((fieldsData.values || []).map((field) => [field.fieldId || field.id, field]));
+    : Array.isArray(fieldsData.values)
+      ? fieldsData.values
+      : fieldsData.fields && typeof fieldsData.fields === "object"
+        ? Object.entries(fieldsData.fields).map(([fieldId, field]) => ({ fieldId, ...field }))
+        : [];
+  const fieldMap = Object.fromEntries(
+    metadataFields
+      .filter((field) => field && (field.fieldId || field.id || field.key))
+      .map((field) => [field.fieldId || field.id || field.key, field]),
+  );
   const resolved = {};
 
   for (const [displayName, desired] of Object.entries(fields)) {
