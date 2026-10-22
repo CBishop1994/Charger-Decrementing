@@ -51,11 +51,6 @@ describe("Jira named required create fields", () => {
       issueType: "Task",
       summary: "[TEST] probe",
       description: "Probe description",
-      requiredFields: {
-        "Service & Issues": "Catalog / Stock Issue",
-        GEO: "US",
-        Customer: "Firstbase",
-      },
       dryRun: false,
     });
 
@@ -75,13 +70,17 @@ describe("Jira named required create fields", () => {
       const target = String(url);
       if (target.includes("/issuetypes?") && options.method === "GET") return Response.json({ values: [{ id: "10001", name: "Task" }] });
       if (target.endsWith("/issuetypes/10001?maxResults=100")) {
-        return Response.json({ fields: { customfield_10101: { name: "GEO", schema: { type: "option" }, allowedValues: [{ id: "1", value: "CA" }] } } });
+        return Response.json({ fields: {
+          customfield_10100: { name: "Service & Issues", schema: { type: "option" }, allowedValues: [{ id: "200", value: "Catalog / Stock Issue" }] },
+          customfield_10101: { name: "GEO", schema: { type: "option" }, allowedValues: [{ id: "1", value: "CA" }, { id: "2", value: "US" }] },
+          customfield_10102: { name: "Customer", schema: { type: "option" }, allowedValues: [{ id: "203", value: "Firstbase" }] },
+        } });
       }
       throw new Error(`Unexpected Jira request: ${options.method} ${target}`);
     };
     await assert.rejects(
-      () => createJiraIssue({ projectKey: "WH", issueType: "Task", summary: "probe", description: "", requiredFields: { GEO: "US" }, dryRun: false }),
-      /Jira field "GEO" has no option "US"\. Available options: CA/,
+      () => createJiraIssue({ projectKey: "WH", issueType: "Task", summary: "probe", description: "", requiredFields: { GEO: "Mars" }, dryRun: false }),
+      /Jira field "GEO" has no option "Mars"\. Available options: CA, US/,
     );
   });
 });

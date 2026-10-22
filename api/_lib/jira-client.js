@@ -130,6 +130,12 @@ export function jiraDescriptionToAdf(value) {
   return { type: "doc", version: 1, content };
 }
 
+const DEFAULT_JIRA_REQUIRED_FIELDS = Object.freeze({
+  "Service & Issues": "Catalog / Stock Issue",
+  GEO: "US",
+  Customer: "Firstbase",
+});
+
 /**
  * Resolve named Jira create fields to their internal field IDs and option IDs.
  * This avoids hard-coding customfield_NNNNN values, which differ by Jira site.
@@ -224,9 +230,11 @@ export async function createJiraIssue(input) {
   const endpoint = `${cfg.baseUrl}/rest/api/3/issue`;
 
   // ADF description keeps Cloud API happy; plain text also accepted via doc node.
-  const requiredFields = input.requiredFields && Object.keys(input.requiredFields).length
-    ? await resolveNamedCreateFields(cfg, input.requiredFields)
-    : {};
+  const requiredFieldValues = {
+    ...DEFAULT_JIRA_REQUIRED_FIELDS,
+    ...(input.requiredFields ?? {}),
+  };
+  const requiredFields = await resolveNamedCreateFields(cfg, requiredFieldValues);
   const body = {
     fields: {
       ...requiredFields,
